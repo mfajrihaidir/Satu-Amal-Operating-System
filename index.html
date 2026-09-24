@@ -414,6 +414,495 @@ body{background:#f7f9fb;color:var(--ink);font-family:Inter,ui-sans-serif,system-
   font-size:9px;
   text-align:center;
 }
+/* =========================================================
+   SATU AMAL OS — RESPONSIVE MOBILE FIX V1
+   Jangan hapus CSS sebelumnya.
+   CSS ini menjadi override paling akhir.
+   ========================================================= */
+
+/* ---------- GLOBAL MOBILE SAFETY ---------- */
+html,
+body{
+  width:100%;
+  max-width:100%;
+  overflow-x:hidden;
+}
+
+*{
+  max-width:100%;
+}
+
+/* ---------- TABLET ---------- */
+@media (max-width: 1024px){
+
+  .main{
+    margin-left:0 !important;
+    width:100% !important;
+  }
+
+  .content{
+    padding:22px 20px 40px !important;
+  }
+
+  .dashboard-grid{
+    grid-template-columns:1fr !important;
+  }
+
+  .dashboard-right{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:12px !important;
+  }
+
+  .kpis{
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+  }
+
+  .check-card{
+    grid-template-columns:1fr 1fr !important;
+  }
+
+  .welcome-row{
+    gap:18px;
+  }
+
+  .meta-weather{
+    gap:14px;
+  }
+}
+
+
+/* =========================================================
+   MOBILE — 768px KE BAWAH
+   ========================================================= */
+
+@media (max-width: 768px){
+
+  /* BODY */
+  html,
+  body{
+    width:100%;
+    min-width:0;
+    overflow-x:hidden;
+  }
+
+  /* APP */
+  .app{
+    width:100%;
+    min-width:0;
+    display:block;
+  }
+
+  /* SIDEBAR */
+  .sidebar{
+    width:270px !important;
+    max-width:85vw;
+    transform:translateX(-110%) !important;
+    transition:transform .25s ease !important;
+    z-index:100 !important;
+    overflow-y:auto;
+    overflow-x:hidden;
+  }
+
+  .sidebar.open{
+    transform:translateX(0) !important;
+  }
+
+  /* MAIN */
+  .main{
+    width:100% !important;
+    min-width:0 !important;
+    margin-left:0 !important;
+  }
+
+  /* TOPBAR */
+  .topbar{
+    width:100%;
+    height:64px !important;
+    min-height:64px;
+    padding:0 14px !important;
+    gap:10px;
+    position:sticky;
+    top:0;
+    z-index:50;
+  }
+
+  .mobile-toggle{
+    display:grid !important;
+    place-items:center;
+    flex:0 0 42px;
+    width:42px;
+    height:42px;
+    padding:0 !important;
+    font-size:20px;
+    border-radius:10px !important;
+  }
+
+  .topbar > div:first-of-type{
+    min-width:0;
+    overflow:hidden;
+  }
+
+  .topbar > div:first-of-type strong{
+    display:block;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    font-size:14px !important;
+  }
+
+  .topbar > div:first-of-type div{
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  /* USER AREA */
+  .user{
+    flex:0 0 auto;
+    gap:7px;
+  }
+
+  .user > div:first-child{
+    display:none !important;
+  }
+
+  .user .avatar{
+    width:36px !important;
+    height:36px !important;
+    flex:0 0 36px;
+  }
+
+  /* CONTENT */
+  .content{
+    width:100%;
+    min-width:0;
+    padding:18px 14px 35px !important;
+  }
+
+  /* WELCOME */
+  .welcome-row{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:flex-start !important;
+    gap:6px !important;
+    margin-bottom:16px !important;
+  }
+
+  .welcome-row > div:first-child{
+    width:100%;
+  }
+
+  .welcome-row h1{
+    font-size:21px !important;
+    line-height:1.3 !important;
+    margin:0 0 5px !important;
+    word-break:break-word;
+  }
+
+  .welcome-row p{
+    font-size:12px !important;
+    line-height:1.5 !important;
+  }
+
+  .meta-weather{
+    display:none !important;
+  }
+
+  /* DASHBOARD */
+  .dashboard-grid{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    width:100%;
+    gap:12px !important;
+  }
+
+  .dashboard-left{
+    width:100%;
+    min-width:0;
+  }
+
+  .dashboard-right{
+    width:100%;
+    min-width:0;
+    display:block !important;
+  }
+
+  .dashboard-right > .card{
+    width:100%;
+    margin-bottom:12px;
+  }
+
+  /* CHECK-IN + QUOTE */
+  .check-card{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    width:100%;
+    gap:12px !important;
+    margin-bottom:12px !important;
+  }
+
+  .checkin-banner,
+  .quote-card{
+    width:100%;
+    min-width:0;
+    min-height:auto !important;
+  }
+
+  .checkin-banner{
+    padding:16px !important;
+  }
+
+  .checkin-time{
+    font-size:24px !important;
+  }
+
+  .quote-card{
+    padding:18px !important;
+  }
+
+  .quote-card h3{
+    max-width:none !important;
+    font-size:17px !important;
+    line-height:1.45 !important;
+  }
+
+  /* KPI */
+  .kpis{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    width:100%;
+    gap:10px !important;
+  }
+
+  .kpi{
+    width:100%;
+    min-width:0;
+    min-height:110px !important;
+    padding:15px !important;
+  }
+
+  .kpi .value{
+    font-size:23px !important;
+    line-height:1.2;
+    word-break:break-word;
+  }
+
+  .kpi .label{
+    font-size:12px !important;
+  }
+
+  .kpi .foot{
+    font-size:10px !important;
+  }
+
+  /* GENERAL CARD */
+  .card{
+    width:100%;
+    min-width:0;
+    border-radius:15px !important;
+  }
+
+  /* PAGE HEADER */
+  .page-head{
+    width:100%;
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:flex-start !important;
+    gap:8px !important;
+  }
+
+  .page-head h1{
+    font-size:22px !important;
+    line-height:1.3;
+  }
+
+  .page-head p{
+    font-size:12px !important;
+  }
+
+  /* TWO COLUMN CONTENT */
+  .two{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    width:100%;
+  }
+
+  /* FORM GRID */
+  .form-grid{
+    grid-template-columns:1fr !important;
+  }
+
+  .form-grid .full{
+    grid-column:auto !important;
+  }
+
+  /* TABLE */
+  .table{
+    display:block;
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .table th,
+  .table td{
+    white-space:nowrap;
+  }
+
+  /* TASK */
+  .task{
+    gap:10px !important;
+    align-items:flex-start;
+  }
+
+  .task h3{
+    font-size:12px !important;
+    line-height:1.4;
+  }
+
+  .task p{
+    font-size:10px !important;
+    line-height:1.4;
+  }
+
+  /* WORK ITEM */
+  .work-item{
+    grid-template-columns:18px minmax(0,1fr) auto !important;
+    gap:7px !important;
+  }
+
+  .work-item h4{
+    font-size:11px !important;
+    line-height:1.4;
+  }
+
+  /* MODAL */
+  .modal{
+    padding:12px !important;
+  }
+
+  .modal-box{
+    width:100% !important;
+    max-width:100% !important;
+    max-height:92vh !important;
+    padding:18px !important;
+    border-radius:16px !important;
+  }
+
+  /* BUTTON */
+  .btn{
+    max-width:100%;
+  }
+
+  /* TOAST */
+  .toast{
+    left:14px;
+    right:14px;
+    bottom:14px;
+    text-align:center;
+  }
+}
+
+
+/* =========================================================
+   SMALL PHONE — 480px KE BAWAH
+   ========================================================= */
+
+@media (max-width: 480px){
+
+  .content{
+    padding:15px 12px 30px !important;
+  }
+
+  .topbar{
+    padding:0 12px !important;
+  }
+
+  .mobile-toggle{
+    width:40px;
+    height:40px;
+    flex-basis:40px;
+  }
+
+  .welcome-row h1{
+    font-size:19px !important;
+  }
+
+  .welcome-row p{
+    font-size:11px !important;
+  }
+
+  .card{
+    border-radius:14px !important;
+  }
+
+  .checkin-banner,
+  .quote-card{
+    padding:15px !important;
+  }
+
+  .checkin-time{
+    font-size:22px !important;
+  }
+
+  .quote-card h3{
+    font-size:16px !important;
+  }
+
+  .kpi{
+    padding:14px !important;
+  }
+
+  .kpi .value{
+    font-size:21px !important;
+  }
+
+  .section-title{
+    font-size:13px !important;
+  }
+
+  .badge{
+    font-size:9px !important;
+  }
+
+  .btn-small{
+    font-size:10px !important;
+    padding:7px 9px !important;
+  }
+}
+
+
+/* =========================================================
+   VERY SMALL PHONE — 380px KE BAWAH
+   ========================================================= */
+
+@media (max-width: 380px){
+
+  .content{
+    padding-left:10px !important;
+    padding-right:10px !important;
+  }
+
+  .topbar{
+    padding-left:10px !important;
+    padding-right:10px !important;
+  }
+
+  .welcome-row h1{
+    font-size:18px !important;
+  }
+
+  .kpi .value{
+    font-size:20px !important;
+  }
+
+  .checkin-banner,
+  .quote-card,
+  .kpi{
+    padding:13px !important;
+  }
+}
 </style>
 </head>
 <body>
