@@ -1305,6 +1305,77 @@ body{
 .module-page .kpi .foot{font-size:10px}
 .module-page .field label{font-size:11px;font-weight:750}
 .module-page .btn{font-size:11px}
+
+
+/* ===== PROFILE QUICK EDIT ===== */
+.user#profileQuick{
+  cursor:pointer;
+  border-radius:12px;
+  padding:5px 6px 5px 8px;
+  transition:.18s ease;
+}
+.user#profileQuick:hover{
+  background:#f2f7fa;
+}
+.user#profileQuick .avatar{
+  transition:.18s ease;
+}
+.user#profileQuick:hover .avatar{
+  transform:translateY(-1px);
+}
+.profile-form-note{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:11px;
+}
+.profile-modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:18px;
+}
+.profile-modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:18px;
+}
+.profile-photo-wrap{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:16px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:#fafcfd;
+}
+.profile-photo-preview{
+  width:72px;
+  height:72px;
+  border-radius:50%;
+  object-fit:cover;
+  flex:0 0 72px;
+  background:#d9f2e2;
+  color:var(--green2);
+  display:grid;
+  place-items:center;
+  font-size:24px;
+  font-weight:850;
+  border:2px solid #fff;
+  box-shadow:0 2px 10px rgba(37,40,43,.08);
+}
+.profile-photo-actions{display:flex;gap:8px;flex-wrap:wrap}
+.profile-photo-help{font-size:10px;color:var(--muted);margin-top:5px}
+.avatar.has-photo{overflow:hidden;padding:0;background:#eef3f6}
+.avatar img{width:100%;height:100%;object-fit:cover;display:block}
+@media(max-width:560px){
+  .user#profileQuick{
+    padding:3px;
+    background:transparent !important;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -1441,7 +1512,13 @@ body{
     <header class="topbar">
       <button class="btn btn-secondary mobile-toggle" onclick="toggleSide()">☰</button>
       <div><strong id="topTitle">Dashboard</strong><div style="font-size:11px;color:var(--muted)" id="topDate">Satu Amal Operating System</div></div>
-      <div class="user"><div style="text-align:right"><strong id="userName"></strong><div style="font-size:11px;color:var(--muted)" id="userDivision"></div></div><div class="avatar" id="avatar"></div></div>
+      <div class="user" id="profileQuick" onclick="openProfileModal()" title="Edit profil">
+  <div style="text-align:right">
+    <strong id="userName"></strong>
+    <div style="font-size:11px;color:var(--muted)" id="userDivision"></div>
+  </div>
+  <div class="avatar" id="avatar"></div>
+</div>
     </header>
     <section id="content" class="content"></section>
   </main>
@@ -1651,7 +1728,11 @@ function logout(){
 }
 function renderApp(){
   document.getElementById('loginScreen').classList.add('hidden');document.getElementById('app').classList.remove('hidden');
-  document.getElementById('userName').textContent=state.user.name;document.getElementById('userDivision').textContent=state.user.division;document.getElementById('avatar').textContent=state.user.name[0].toUpperCase();
+  document.getElementById('userName').textContent=state.user.name;
+  document.getElementById('userDivision').textContent=state.user.division;
+  const avatar=document.getElementById('avatar');
+  avatar.classList.toggle('has-photo',!!state.user.photo);
+  avatar.innerHTML=state.user.photo?`<img src="${state.user.photo}" alt="Foto profil ${escapeHtml(state.user.name)}">`:escapeHtml(state.user.name[0].toUpperCase());
   document.getElementById('topDate').textContent=todayLong();
 }
 function showPage(page){
@@ -1872,7 +1953,110 @@ function reportingPage(){const done=state.reports.filter(x=>x.status==='SELESAI'
 function openReport(id){const x=state.reports.find(a=>a.id===id)||{id:'RPT-'+String(Date.now()).slice(-6),period:'September 2026',type:'Laporan Bulanan',status:'BERJALAN',progress:0,pic:state.user.name,notes:''};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Buat'} Laporan</h2><div class="form-grid"><div class="field"><label>Periode</label><input id="qPeriod" value="${esc(x.period)}"></div><div class="field"><label>Tipe Laporan</label><select id="qType">${['Laporan Bulanan','Laporan Program','Laporan Fundraising','Laporan Kemitraan','Laporan Konten'].map(v=>`<option ${v===x.type?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="qStatus">${['BERJALAN','SELESAI','REVISI'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Progress (%)</label><input id="qProgress" type="number" min="0" max="100" value="${Number(x.progress)||0}"></div><div class="field"><label>PIC</label><input id="qPic" value="${esc(x.pic)}"></div><div class="field full"><label>Catatan</label><textarea id="qNotes" rows="3">${esc(x.notes||'')}</textarea></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveReport('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
 function saveReport(id){const period=document.getElementById('qPeriod').value.trim();if(!period){toast('Periode laporan wajib diisi.');return}const data={id:id||'RPT-'+String(Date.now()).slice(-6),period,type:document.getElementById('qType').value,status:document.getElementById('qStatus').value,progress:Math.max(0,Math.min(100,Number(document.getElementById('qProgress').value)||0)),pic:document.getElementById('qPic').value.trim()||state.user.name,notes:document.getElementById('qNotes').value.trim()};const i=state.reports.findIndex(a=>a.id===data.id);if(i>=0)state.reports[i]=data;else state.reports.push(data);save();closeModal();showPage('reporting');toast('Laporan tersimpan ✅')}
 function deleteReport(id){if(!confirm('Hapus laporan ini?'))return;state.reports=state.reports.filter(x=>x.id!==id);save();showPage('reporting');toast('Laporan dihapus.')}
-function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
+function openProfileModal(){
+  if(!state.user){toast('Profil belum tersedia.');return}
+  const name=state.user.name||'';
+  const division=state.user.division||'';
+  const role=state.user.role||'Staff';
+  document.getElementById('modalBox').innerHTML=`
+    <div class="page-head" style="margin-bottom:8px">
+      <div>
+        <h1 style="font-size:20px">Edit Profil</h1>
+        <p>Perbarui informasi profil yang tampil di sistem.</p>
+      </div>
+    </div>
+    <div class="profile-photo-wrap">
+      <div id="profilePhotoPreview" class="profile-photo-preview">${escapeHtml((name||'U').charAt(0).toUpperCase())}</div>
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:800;font-size:12px;margin-bottom:4px">Foto Profil</div>
+        <div class="profile-photo-actions">
+          <button type="button" class="btn btn-secondary btn-small" onclick="document.getElementById('profilePhotoInput').click()">Pilih Foto</button>
+          <button type="button" class="btn btn-secondary btn-small" onclick="removeProfilePhoto()">Hapus Foto</button>
+        </div>
+        <div class="profile-photo-help">JPG, PNG, atau WEBP. Foto disimpan di browser ini sampai sistem terhubung ke database online.</div>
+        <input id="profilePhotoInput" type="file" accept="image/png,image/jpeg,image/webp" hidden onchange="previewProfilePhoto(event)">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="field full">
+        <label>NAMA LENGKAP</label>
+        <input id="profileName" value="${escapeHtml(name)}" placeholder="Masukkan nama lengkap">
+      </div>
+      <div class="field">
+        <label>DIVISI</label>
+        <select id="profileDivision">
+          ${['Manajemen','Fundraising','Program','Content','CRM / Donor','Kemitraan','Dokumentasi'].map(x=>`<option ${x===division?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>PERAN</label>
+        <select id="profileRole">
+          ${['Staff','Koordinator','Manajemen'].map(x=>`<option ${x===role?'selected':''}>${x}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="profile-form-note">Perubahan hanya berlaku pada profil yang tersimpan di browser ini.</div>
+    <div class="profile-modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Batal</button>
+      <button class="btn btn-primary" onclick="saveProfile()">Simpan Profil</button>
+    </div>`;
+  state.__profilePhotoDraft=state.user.photo||'';
+  document.getElementById('modal').classList.remove('hidden');
+  updateProfilePhotoPreview();
+  document.getElementById('profileName').focus();
+}
+
+function updateProfilePhotoPreview(){
+  const el=document.getElementById('profilePhotoPreview');
+  if(!el) return;
+  const photo=state.__profilePhotoDraft!==undefined ? state.__profilePhotoDraft : (state.user?.photo||'');
+  if(photo){
+    el.innerHTML=`<img src="${photo}" alt="Foto profil">`;
+  }else{
+    const name=(document.getElementById('profileName')?.value||state.user?.name||'U').trim();
+    el.textContent=(name.charAt(0)||'U').toUpperCase();
+  }
+}
+
+function previewProfilePhoto(event){
+  const file=event.target.files?.[0];
+  if(!file) return;
+  if(file.size>3*1024*1024){toast('Ukuran foto maksimal 3 MB.');event.target.value='';return}
+  if(!/^image\/(png|jpeg|webp)$/.test(file.type)){toast('Gunakan foto PNG, JPG, atau WEBP.');event.target.value='';return}
+  const reader=new FileReader();
+  reader.onload=()=>{state.__profilePhotoDraft=String(reader.result||'');updateProfilePhotoPreview()};
+  reader.readAsDataURL(file);
+}
+
+function removeProfilePhoto(){
+  state.__profilePhotoDraft='';
+  const input=document.getElementById('profilePhotoInput');
+  if(input) input.value='';
+  updateProfilePhotoPreview();
+}
+
+function saveProfile(){
+  const name=(document.getElementById('profileName')?.value||'').trim();
+  const division=document.getElementById('profileDivision')?.value||'';
+  const role=document.getElementById('profileRole')?.value||'Staff';
+  if(!name){toast('Nama lengkap wajib diisi.');document.getElementById('profileName').focus();return}
+  if(!division){toast('Divisi wajib dipilih.');return}
+  const photo=state.__profilePhotoDraft!==undefined ? state.__profilePhotoDraft : (state.user?.photo||'');
+  state.user={...state.user,name,division,role,photo};
+  delete state.__profilePhotoDraft;
+  save();
+  renderApp();
+  closeModal();
+  toast('Profil berhasil diperbarui. ✅');
+}
+
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div><button class="btn btn-primary" onclick="openProfileModal()">Edit Profil</button></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)}
 function toggleSide(){document.getElementById('sidebar').classList.toggle('open')}
 if(state.user && state.checkedIn){renderApp();showPage('dashboard')}else{document.getElementById('app').classList.add('hidden');document.getElementById('verificationScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
