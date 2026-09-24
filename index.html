@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Satu Amal Indonesia Operating System</title>
+<title>Satu Amal Operating System</title>
 <style>
 :root{
   --brand-cyan:#43c7e8;
@@ -1280,6 +1280,14 @@ body{
   .login-title{font-size:24px}
   .login-subtitle{font-size:14px;margin-bottom:24px}
 }
+
+/* ===== FUNCTIONAL DASHBOARD V1 ===== */
+.dashboard-link{transition:transform .15s ease,box-shadow .15s ease}.dashboard-link:hover{transform:translateY(-2px);box-shadow:0 5px 18px rgba(10,45,80,.08)}
+.dashboard-check{width:19px;height:19px;border:1px solid #b9c9d6;border-radius:5px;background:#fff;display:grid;place-items:center;flex:0 0 auto;color:#fff;font-weight:900}
+.dashboard-check.checked{background:#10b981;border-color:#10b981}
+.task-done{opacity:.8}
+.task-done .pill-time{background:#e9f9f3;color:#14835f}
+.right-title a{cursor:pointer}
 </style>
 </head>
 <body>
@@ -1427,14 +1435,6 @@ body{
 
 
 <script>
-/* V5 prototype: always start from Login when the HTML is opened/reloaded. */
-try {
-  localStorage.removeItem('sa_user');
-  localStorage.removeItem('sa_checkin_time');
-  localStorage.removeItem('sa_attendance_photo');
-  localStorage.removeItem('sa_attendance_date');
-} catch(e) {}
-
 const state = {
   user: JSON.parse(localStorage.getItem('sa_user') || 'null'),
   checkedIn: localStorage.getItem('sa_checked') === 'true',
@@ -1446,7 +1446,17 @@ const state = {
     {id:'WRK-005',title:'Kirim ucapan terima kasih donor',module:'CRM',program:'Bantuan MCK NTT',deadline:'16 Sep 2026',status:'COMPLETED',progress:100,pic:'Fajri'}
   ]
 };
-function save(){localStorage.setItem('sa_user',JSON.stringify(state.user));localStorage.setItem('sa_checked',state.checkedIn);localStorage.setItem('sa_tasks',JSON.stringify(state.tasks))}
+const defaultDashboardTasks = [
+  {id:'DB-001',title:'Review draft video MCK NTT',module:'Konten',time:'Hari ini',done:false},
+  {id:'DB-002',title:'Follow-up PT ABC',module:'Kemitraan',time:'Hari ini',done:false},
+  {id:'DB-003',title:'Update laporan mingguan',module:'Manajemen',time:'Hari ini',done:false},
+  {id:'DB-004',title:'Meeting persiapan VTT Episode 03',module:'Program',time:'14:00',done:false},
+  {id:'DB-005',title:'Buat konsep campaign Sedekah Air',module:'Konten',time:'16:00',done:false}
+];
+const dashboardTasks = JSON.parse(localStorage.getItem('sa_dashboard_tasks') || 'null') || defaultDashboardTasks;
+function save(){localStorage.setItem('sa_user',JSON.stringify(state.user));localStorage.setItem('sa_checked',state.checkedIn);localStorage.setItem('sa_tasks',JSON.stringify(state.tasks));localStorage.setItem('sa_dashboard_tasks',JSON.stringify(dashboardTasks))}
+function todayLong(){return new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
+function nowTime(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});}
 let cameraStream = null;
 let photoVerified = false;
 
@@ -1568,7 +1578,7 @@ function logout(){
 function renderApp(){
   document.getElementById('loginScreen').classList.add('hidden');document.getElementById('app').classList.remove('hidden');
   document.getElementById('userName').textContent=state.user.name;document.getElementById('userDivision').textContent=state.user.division;document.getElementById('avatar').textContent=state.user.name[0].toUpperCase();
-  document.getElementById('topDate').textContent=new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('topDate').textContent=todayLong();
 }
 function showPage(page){
   if(!state.checkedIn && page!=='attendance'){toast('Silakan check-in terlebih dahulu.');page='attendance'}
@@ -1590,33 +1600,45 @@ function showPage(page){
   document.getElementById('sidebar').classList.remove('open');
 }
 function attendancePage(){
-  const t=new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
-  if(!state.checkedIn) return `<div class="checkin-wrap"><div class="page-head"><div><h1>Absensi Tim</h1><p>Check-in adalah pintu masuk ke ruang kerja digital.</p></div></div><div class="card checkin-card"><div style="font-size:50px">🕐</div><h2>Selamat bekerja, ${state.user.name} 👋</h2><div class="clock">${t}</div><span class="badge b-yellow">BELUM CHECK-IN</span><p style="color:var(--muted)">Divisi: ${state.user.division}</p><button class="btn btn-primary" style="margin-top:15px;padding:14px 26px" onclick="checkIn()">✓ CHECK-IN SEKARANG</button></div></div>`;
-  return `<div class="checkin-wrap"><div class="page-head"><div><h1>Absensi Tim</h1><p>Hari ini kamu sudah terdaftar sebagai hadir.</p></div></div><div class="card checkin-card"><div style="font-size:50px">✅</div><h2>Check-in berhasil</h2><div class="clock">${localStorage.getItem('sa_checkin_time')||t}</div><span class="badge b-green">HADIR</span><p style="color:var(--muted)">Divisi: ${state.user.division}</p><button class="btn btn-primary" onclick="showPage('dashboard')">Masuk Dashboard</button><button class="btn btn-secondary" style="margin-left:8px" onclick="checkOut()">Check-out</button></div></div>`;
+  const t=nowTime();
+  const date=todayLong();
+  if(!state.checkedIn) return `<div class="checkin-wrap"><div class="page-head"><div><h1>Absensi Tim</h1><p>Check-in adalah pintu masuk ke ruang kerja digital.</p></div></div><div class="card checkin-card"><div style="font-size:50px">🕐</div><h2>Selamat bekerja, ${state.user.name} 👋</h2><div class="clock">${t}</div><div style="font-size:12px;color:var(--muted);margin:0 0 8px">${date}</div><span class="badge b-yellow">BELUM CHECK-IN</span><p style="color:var(--muted)">Divisi: ${state.user.division}</p><button class="btn btn-primary" style="margin-top:15px;padding:14px 26px" onclick="checkIn()">✓ CHECK-IN SEKARANG</button></div></div>`;
+  return `<div class="checkin-wrap"><div class="page-head"><div><h1>Absensi Tim</h1><p>Hari ini kamu sudah terdaftar sebagai hadir.</p></div></div><div class="card checkin-card"><div style="font-size:50px">✅</div><h2>Check-in berhasil</h2><div class="clock">${localStorage.getItem('sa_checkin_time')||t}</div><div style="font-size:12px;color:var(--muted);margin:0 0 8px">${date}</div><span class="badge b-green">HADIR</span><p style="color:var(--muted)">Divisi: ${state.user.division}</p><button class="btn btn-primary" onclick="showPage('dashboard')">Masuk Dashboard</button><button class="btn btn-secondary" style="margin-left:8px" onclick="checkOut()">Check-out</button></div></div>`;
 }
 function checkIn(){if(state.user){document.getElementById('verificationScreen').classList.remove('hidden');document.getElementById('app').classList.add('hidden');startCamera()}else{toast('Silakan login terlebih dahulu.')}}
 function checkOut(){state.checkedIn=false;localStorage.removeItem('sa_checkin_time');save();toast('Check-out berhasil. Sampai jumpa!');showPage('attendance')}
 function dashboardPage(){
+  const date=todayLong();
+  const time=localStorage.getItem('sa_checkin_time')||nowTime();
+  const taskHtml=dashboardTasks.map((x,i)=>{
+    const colors=['green','orange','blue','green','purple'];
+    const color=colors[i%colors.length];
+    return `<div class="work-item ${x.done?'task-done':''}" onclick="toggleDashboardTask(${i})" style="cursor:pointer">
+      <button class="box dashboard-check ${x.done?'checked':''}" aria-label="Tandai tugas ${x.title}">${x.done?'✓':''}</button>
+      <div><h4 style="${x.done?'text-decoration:line-through;opacity:.6':''}"><span class="dot ${color}"></span>${x.title}</h4><small>♟ ${x.module}</small></div>
+      <span class="pill-time">${x.done?'Selesai':x.time}</span>
+    </div>`;
+  }).join('');
   return `<div class="welcome-row">
     <div><h1>Selamat pagi, ${state.user.name} 👋</h1><p>Mari lanjutkan kebaikan hari ini. Setiap langkah kecil, membawa dampak besar.</p></div>
-    <div class="meta-weather"><div>▣<strong>Selasa, 16 September 2026<br>08:12 WIB</strong></div><div>☀️<strong>Palembang<br>Cerah, 28°C</strong></div></div>
+    <div class="meta-weather"><div>▣<strong>${date}<br>${time} WIB</strong></div><div>☀️<strong>Palembang<br>Cerah, 28°C</strong></div></div>
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-left">
       <div class="check-card">
-        <div class="card checkin-banner"><div class="section-title">Sudah check-in hari ini?</div><div style="font-size:12px;color:#58718b;margin-bottom:8px">Absen dulu sebelum mulai bekerja</div><div class="checkin-time">◷ 08:12</div><div style="font-size:10px;color:#71869a;margin:2px 0 9px">Selasa, 16 September 2026</div><span class="badge b-green">KEHADIRAN TERVERIFIKASI</span> <button class="btn btn-secondary btn-small" style="margin-left:6px" onclick="showPage('attendance')">Lihat Absensi</button></div>
+        <div class="card checkin-banner"><div class="section-title">Sudah check-in hari ini?</div><div style="font-size:12px;color:#58718b;margin-bottom:8px">Absen dulu sebelum mulai bekerja</div><div class="checkin-time">◷ ${time}</div><div style="font-size:10px;color:#71869a;margin:2px 0 9px">${date}</div><span class="badge b-green">KEHADIRAN TERVERIFIKASI</span> <button class="btn btn-secondary btn-small" style="margin-left:6px" onclick="showPage('attendance')">Lihat Absensi</button></div>
         <div class="card quote-card"><h3>“Satu sistem, satu alur kerja, satu dampak yang lebih besar.”</h3><p>— Satu Amal Indonesia</p></div>
       </div>
       <div class="grid kpis">
-        <div class="card kpi"><div>💰</div><div class="label">Penggalangan Dana</div><div class="value">Rp 270.657.514</div><div class="foot">Bulan Ini</div><div style="font-size:9px;color:#16a37c;margin-top:8px">↗ 12,4% dari bulan lalu</div></div>
-        <div class="card kpi"><div>▣</div><div class="label">Program</div><div class="value">12</div><div class="foot">Program Aktif</div><div style="font-size:9px;color:#16a37c;margin-top:8px">● 8 On Track &nbsp; ● 2 At Risk &nbsp; ● 2 Delayed</div></div>
-        <div class="card kpi"><div>▧</div><div class="label">Konten</div><div class="value">28</div><div class="foot">Konten Terbit</div><div style="font-size:9px;color:#496c91;margin-top:8px">125.430 Total Jangkauan</div></div>
-        <div class="card kpi"><div>👥</div><div class="label">CRM / Donor</div><div class="value">497</div><div class="foot">Donor Unik</div><div style="font-size:9px;color:#496c91;margin-top:8px">32 Follow-up Pending</div></div>
-        <div class="card kpi"><div>🤝</div><div class="label">Kemitraan</div><div class="value">12</div><div class="foot">Kemitraan Aktif</div><div style="font-size:9px;color:#496c91;margin-top:8px">Rp 102.267.805 Realisasi</div></div>
-        <div class="card kpi"><div>👤</div><div class="label">Tim & Absensi</div><div class="value">8 / 9</div><div class="foot">Hadir Hari Ini</div><div style="font-size:9px;color:#496c91;margin-top:8px">88,9% Tingkat Kehadiran</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('fundraising')"><div>💰</div><div class="label">Penggalangan Dana</div><div class="value">Rp 270.657.514</div><div class="foot">Bulan Ini</div><div style="font-size:9px;color:#16a37c;margin-top:8px">↗ 12,4% dari bulan lalu</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('program')"><div>▣</div><div class="label">Program</div><div class="value">12</div><div class="foot">Program Aktif</div><div style="font-size:9px;color:#16a37c;margin-top:8px">● 8 On Track &nbsp; ● 2 At Risk &nbsp; ● 2 Delayed</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('content')"><div>▧</div><div class="label">Konten</div><div class="value">28</div><div class="foot">Konten Terbit</div><div style="font-size:9px;color:#496c91;margin-top:8px">125.430 Total Jangkauan</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('crm')"><div>👥</div><div class="label">CRM / Donor</div><div class="value">497</div><div class="foot">Donor Unik</div><div style="font-size:9px;color:#496c91;margin-top:8px">32 Follow-up Pending</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('partnership')"><div>🤝</div><div class="label">Kemitraan</div><div class="value">12</div><div class="foot">Kemitraan Aktif</div><div style="font-size:9px;color:#496c91;margin-top:8px">Rp 102.267.805 Realisasi</div></div>
+        <div class="card kpi dashboard-link" onclick="showPage('attendance')"><div>👤</div><div class="label">Tim & Absensi</div><div class="value">8 / 9</div><div class="foot">Hadir Hari Ini</div><div style="font-size:9px;color:#496c91;margin-top:8px">88,9% Tingkat Kehadiran</div></div>
       </div>
       <div class="grid two chart-card">
-        <div class="card"><div class="right-title"><strong>Tren Penggalangan Dana 2026</strong><select style="border:1px solid #e2e9ef;border-radius:6px;padding:5px;font-size:10px;color:#47627a"><option>Tahun 2026</option></select></div>
+        <div class="card"><div class="right-title"><strong>Tren Penggalangan Dana 2026</strong><select id="fundraisingYear" onchange="toast('Tahun grafik diubah ke '+this.value)" style="border:1px solid #e2e9ef;border-radius:6px;padding:5px;font-size:10px;color:#47627a"><option>2026</option><option>2025</option><option>2024</option></select></div>
           <div class="chart-wrap"><div class="fake-chart">
             ${[['Jan',55],['Feb',68],['Mar',78],['Apr',92],['Mei',112],['Jun',122],['Jul',140],['Agu',116],['Sep',72],['Okt',54],['Nov',68],['Des',96]].map((x,i)=>`<div class="chart-col ${i===7?'active':''}"><div class="barv" style="height:${x[1]}px"></div><small>${x[0]}</small></div>`).join('')}
           </div></div>
@@ -1624,26 +1646,39 @@ function dashboardPage(){
         <div class="card"><div class="section-title">Sumber Penghimpunan (Agustus 2026)</div><div class="source-grid"><div class="donut"></div><div class="legend">${[['Kemitraan','37,8%'],['Galang Dana','17,8%'],['IVC','16,4%'],['Social Media','8,0%'],['Tim Manajemen','5,7%'],['Volunteer','4,7%'],['CRM','9,0%'],['Lainnya','0,6%']].map((x,i)=>`<div><span><i style="background:${['#2bb99a','#3f8be8','#f4aa32','#806fe5','#ee6373','#2e78d0','#65a0df','#b9c7d4'][i]}"></i>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div></div></div>
       </div>
       <div class="grid two" style="margin-top:12px">
-        <div class="card"><div class="right-title"><strong>Program Prioritas</strong><a> Lihat Semua</a></div><div class="priority-list">
-          ${[['Bantuan MCK NTT','80%','Fajri'],['Sedekah Air Bersih','65%','Intan'],['Tangan Ibu','70%','Saliha']].map((x,i)=>`<div class="row"><div class="thumb"></div><div><strong>${x[0]}</strong><br><span style="color:#8094a6">Progress <b style="color:#174b72">${x[1]}</b></span></div><span class="badge b-green">On Track</span></div>`).join('')}
+        <div class="card"><div class="right-title"><strong>Program Prioritas</strong><a href="#" onclick="event.preventDefault();showPage('program')">Lihat Semua</a></div><div class="priority-list">
+          ${[['Bantuan MCK NTT','80%','Fajri'],['Sedekah Air Bersih','65%','Intan'],['Tangan Ibu','70%','Saliha']].map((x,i)=>`<div class="row dashboard-link" onclick="showPage('program')" style="cursor:pointer"><div class="thumb"></div><div><strong>${x[0]}</strong><br><span style="color:#8094a6">Progress <b style="color:#174b72">${x[1]}</b></span></div><span class="badge b-green">On Track</span></div>`).join('')}
         </div></div>
-        <div class="card"><div class="right-title"><strong>Konten Terbaru</strong><a>Lihat Semua ›</a></div><div class="latest-list">
-          ${[['Bantuan MCK NTT','Video Reels · Instagram','12 Sep 2026'],['Sedekah Air Bersih','Poster · Instagram','10 Sep 2026'],['Tangan Ibu: Karya dari Limbah','Carousel · Instagram','8 Sep 2026']].map(x=>`<div class="row"><div class="thumb"></div><div><strong>${x[0]}</strong><br><span style="color:#8094a6">${x[1]}</span></div><span style="color:#71869a">${x[2]}</span></div>`).join('')}
+        <div class="card"><div class="right-title"><strong>Konten Terbaru</strong><a href="#" onclick="event.preventDefault();showPage('content')">Lihat Semua ›</a></div><div class="latest-list">
+          ${[['Bantuan MCK NTT','Video Reels · Instagram','12 Sep 2026'],['Sedekah Air Bersih','Poster · Instagram','10 Sep 2026'],['Tangan Ibu: Karya dari Limbah','Carousel · Instagram','8 Sep 2026']].map(x=>`<div class="row dashboard-link" onclick="showPage('content')" style="cursor:pointer"><div class="thumb"></div><div><strong>${x[0]}</strong><br><span style="color:#8094a6">${x[1]}</span></div><span style="color:#71869a">${x[2]}</span></div>`).join('')}
         </div></div>
       </div>
-      <div class="footer-mini"><span>© 2026 Satu Amal Indonesia. All rights reserved.</span><span>Kebijakan Privasi &nbsp; | &nbsp; Syarat & Ketentuan &nbsp; | &nbsp; Bantuan</span></div>
+      <div class="footer-mini"><span>© 2026 Satu Amal Indonesia. All rights reserved.</span><span>Kebijakan Privasi &nbsp; | &nbsp; <a href="#" onclick="event.preventDefault();toast('Halaman syarat & ketentuan siap dikembangkan')">Syarat & Ketentuan</a> &nbsp; | &nbsp; <a href="#" onclick="event.preventDefault();toast('Pusat bantuan siap dikembangkan')">Bantuan</a></span></div>
     </div>
     <div class="dashboard-right">
-      <div class="card"><div class="right-title"><strong>Pekerjaan Hari Ini</strong><a>Lihat Semua</a></div>
-        ${[['Review draft video MCK NTT','Konten','Hari ini','green'],['Follow-up PT ABC','Kemitraan','Hari ini','orange'],['Update laporan mingguan','Manajemen','Hari ini','blue'],['Meeting persiapan VTT Episode 03','Program','14:00','green'],['Buat konsep campaign Sedekah Air','Konten','16:00','purple']].map(x=>`<div class="work-item"><div class="box"></div><div><h4><span class="dot ${x[3]}"></span>${x[0]}</h4><small>♟ ${x[1]}</small></div><span class="pill-time">${x[2]}</span></div>`).join('')}
-      </div>
-      <div class="card"><div class="right-title"><strong>Jadwal Mendatang</strong><a>Lihat Kalender</a></div>
+      <div class="card"><div class="right-title"><strong>Pekerjaan Hari Ini</strong><a href="#" onclick="event.preventDefault();showPage('work')">Lihat Semua</a></div>${taskHtml}</div>
+      <div class="card"><div class="right-title"><strong>Jadwal Mendatang</strong><a href="#" onclick="event.preventDefault();openCalendar()">Lihat Kalender</a></div>
         ${[['18','SEP','Presentasi Proposal – PT ABC','10:00 – 12:00 · Online Meeting'],['20','SEP','Pelatihan Digital Fundraising','09:00 – 16:00 · Palembang'],['25','SEP','VTT Episode 03 – Pulau Salah Nama','07:00 – Selesai · Lapangan']].map(x=>`<div class="schedule-item"><div class="datebox"><b>${x[0]}</b><span>${x[1]}</span></div><div><h4>${x[2]}</h4><p>${x[3]}</p></div></div>`).join('')}
       </div>
-      <div class="card"><div class="right-title"><strong>Pengumuman</strong><a>Lihat Semua</a></div><div class="announcement"><h4>📣 FGD Sinergi Patra Berdaya 2026</h4><p>Persiapan pelatihan UMKM bersama PT Pertamina<br><br>15 September 2026</p></div></div>
+      <div class="card"><div class="right-title"><strong>Pengumuman</strong><a href="#" onclick="event.preventDefault();openAnnouncement()">Lihat Semua</a></div><div class="announcement dashboard-link" onclick="openAnnouncement()" style="cursor:pointer"><h4>📣 FGD Sinergi Patra Berdaya 2026</h4><p>Persiapan pelatihan UMKM bersama PT Pertamina<br><br>15 September 2026</p></div></div>
     </div>
   </div>`;
 }
+function toggleDashboardTask(index){
+  dashboardTasks[index].done=!dashboardTasks[index].done;
+  save();
+  toast(dashboardTasks[index].done?'Pekerjaan ditandai selesai ✅':'Pekerjaan dibuka kembali');
+  showPage('dashboard');
+}
+function openCalendar(){
+  document.getElementById('modalBox').innerHTML=`<h2>Jadwal Mendatang</h2><div class="task" style="display:block"><strong>18 September</strong><p>Presentasi Proposal – PT ABC · 10:00–12:00 · Online Meeting</p></div><div class="task" style="display:block"><strong>20 September</strong><p>Pelatihan Digital Fundraising · 09:00–16:00 · Palembang</p></div><div class="task" style="display:block"><strong>25 September</strong><p>VTT Episode 03 – Pulau Salah Nama · 07:00–Selesai · Lapangan</p></div><div style="text-align:right;margin-top:14px"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function openAnnouncement(){
+  document.getElementById('modalBox').innerHTML=`<h2>Pengumuman</h2><div class="alert"><strong>FGD Sinergi Patra Berdaya 2026</strong><br><br>Persiapan pelatihan UMKM bersama PT Pertamina.<br><br><small>15 September 2026</small></div><div style="text-align:right;margin-top:14px"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
 function kpi(icon,label,value,foot){return `<div class="card kpi"><div style="font-size:22px">${icon}</div><div class="label">${label}</div><div class="value">${value}</div><div class="foot">${foot}</div></div>`}
 function taskHtml(t){return `<div class="task"><div><h3>${t.title}</h3><p>${t.module} • ${t.program} • Deadline ${t.deadline}</p></div><div style="text-align:right"><span class="badge ${t.status==='COMPLETED'?'b-green':t.status==='IN PROGRESS'?'b-blue':t.status==='PLAN'?'b-yellow':'b-purple'}">${t.status}</span><div style="margin-top:7px;font-size:11px;color:var(--muted)">${t.progress}%</div></div></div>`}
 function workPage(){return `<div class="page-head"><div><h1>Pekerjaan Saya</h1><p>Semua pekerjaan yang menjadi tanggung jawabmu.</p></div><button class="btn btn-primary" onclick="openTask()">+ Tambah Pekerjaan</button></div><div class="grid kpis">${kpi('🔴','Terlambat','1','Perlu segera ditindaklanjuti')}${kpi('🟡','Jatuh Tempo','2','Hari ini')}${kpi('🔵','Sedang Dikerjakan','2','Dalam proses')}${kpi('🟢','Selesai','5','Bulan ini')}</div><div class="card" style="margin-top:16px"><table class="table"><thead><tr><th>Pekerjaan</th><th>Program</th><th>Deadline</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>${state.tasks.map(t=>`<tr><td><strong>${t.title}</strong><br><small>${t.id}</small></td><td>${t.program}</td><td>${t.deadline}</td><td><span class="badge ${t.status==='COMPLETED'?'b-green':t.status==='IN PROGRESS'?'b-blue':t.status==='PLAN'?'b-yellow':'b-purple'}">${t.status}</span></td><td>${t.progress}%</td><td><button class="btn btn-secondary btn-small" onclick="openTask('${t.id}')">Update</button></td></tr>`).join('')}</tbody></table></div>`}
@@ -1668,7 +1703,7 @@ function reportingPage(){return `<div class="page-head"><div><h1>Pelaporan</h1><
 function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)}
 function toggleSide(){document.getElementById('sidebar').classList.toggle('open')}
-document.getElementById('app').classList.add('hidden');document.getElementById('verificationScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')
+if(state.user && state.checkedIn){renderApp();showPage('dashboard')}else{document.getElementById('app').classList.add('hidden');document.getElementById('verificationScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
 </script>
 </body>
 </html>
