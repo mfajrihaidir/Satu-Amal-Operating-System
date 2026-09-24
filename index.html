@@ -1376,6 +1376,20 @@ body{
   }
 }
 
+
+/* ===== SUPPORT MODULES: ADMINISTRASI + KEUANGAN ===== */
+.support-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.support-mini{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
+.support-mini small{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}
+.support-mini strong{display:block;color:#0d3153;font-size:19px}
+.support-filter{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.support-filter .field{margin:0;min-width:180px}
+.finance-flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
+.finance-flow .flow-box{padding:12px;border-radius:10px;background:#f8fafc;border:1px solid var(--line)}
+.finance-flow .flow-box strong{display:block;margin-top:4px;font-size:16px;color:#0d3153}
+@media(max-width:900px){.support-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-flow{grid-template-columns:1fr}}
+@media(max-width:560px){.support-summary{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -1501,6 +1515,11 @@ body{
       <button data-page="docs" onclick="showPage('docs')">📁 Dokumentasi</button>
       <button data-page="reporting" onclick="showPage('reporting')">📊 Pelaporan</button>
     </div>
+    <div class="nav-title">Support</div>
+    <div class="nav">
+      <button data-page="administration" onclick="showPage('administration')">🗂️ Administrasi</button>
+      <button data-page="finance" onclick="showPage('finance')">💼 Keuangan</button>
+    </div>
     <div class="nav-title">Sistem</div>
     <div class="nav">
       <button data-page="settings" onclick="showPage('settings')">⚙️ Data Pengguna</button>
@@ -1576,6 +1595,14 @@ const state = {
   reports: JSON.parse(localStorage.getItem('sa_reports') || 'null') || [
     {id:'RPT-001',period:'September 2026',type:'Laporan Bulanan',status:'BERJALAN',progress:82,pic:'Fajri',notes:'Rekap kegiatan dan fundraising periode berjalan.'},
     {id:'RPT-002',period:'Agustus 2026',type:'Laporan Bulanan',status:'SELESAI',progress:100,pic:'Fajri',notes:'Laporan fundraising, program, CRM dan konten bulan Agustus.'}
+  ],
+  administration: JSON.parse(localStorage.getItem('sa_administration') || 'null') || [
+    {id:'ADM-001',title:'Proposal Gerakan Tebar 10.000 Al-Qur’an',category:'Administrasi Program',program:'Gerakan Tebar 10.000 Al-Qur’an',status:'PROSES',date:'2026-09-20',dueDate:'2026-09-28',pic:'Fajri',link:'',notes:'Draft proposal utama program.'},
+    {id:'ADM-002',title:'Berita Acara VTT Episode 02',category:'Notulen / BA',program:'Volunteer Teaching Trip',status:'SELESAI',date:'2026-09-10',dueDate:'2026-09-12',pic:'Dokumentasi',link:'',notes:'Berita acara kegiatan.'}
+  ],
+  finance: JSON.parse(localStorage.getItem('sa_finance') || 'null') || [
+    {id:'FIN-001',sourceId:'FD-001',date:'2026-08-31',type:'PEMASUKAN',category:'Penghimpunan Dana',description:'Kemitraan Patra Berdaya',program:'',programId:'',amount:102267805,account:'Kas Fundraising',pic:'Fajri',evidence:'',notes:'Sinkron dari Penggalangan Dana'},
+    {id:'FIN-002',sourceId:'',date:'2026-09-02',type:'PENGELUARAN',category:'Pengeluaran Program',description:'Pembelian kebutuhan program',program:'Bantuan MCK NTT',programId:'PRG-001',amount:7500000,account:'Kas Program',pic:'Fajri',evidence:'',notes:'Pengeluaran program contoh'}
   ]
 };
 
@@ -2321,6 +2348,222 @@ renderApp = function(){
 
 /* Keep a central snapshot available even before the first user action. */
 try{ stage1SaveDatabase(); }catch(e){}
+
+
+/* ================= SUPPORT MODULES V2: ADMINISTRASI + KEUANGAN ================= */
+(function initSupportModules(){
+  if(!Array.isArray(state.administration)) state.administration=[];
+  if(!Array.isArray(state.finance)) state.finance=[];
+  state.finance = state.finance.map(x=>({...x, programId:x.programId||stage1ProgramId(x.program), sourceId:x.sourceId||''}));
+  if(localStorage.getItem('sa_finance_opening_balance')===null){ localStorage.setItem('sa_finance_opening_balance','0'); }
+})();
+
+const _supportSaveBase = save;
+save = function(){
+  _supportSaveBase();
+  try{
+    localStorage.setItem('sa_administration',JSON.stringify(state.administration||[]));
+    localStorage.setItem('sa_finance',JSON.stringify(state.finance||[]));
+  }catch(e){ console.warn('Support data save failed',e); }
+};
+
+const _stage1SnapshotBeforeSupport = stage1Snapshot;
+stage1Snapshot = function(){
+  const base=_stage1SnapshotBeforeSupport();
+  base.administration=state.administration||[];
+  base.finance=state.finance||[];
+  base.financeOpeningBalance=Number(localStorage.getItem('sa_finance_opening_balance')||0);
+  return base;
+};
+
+function supportDate(){ return dateId ? dateId() : new Date().toISOString().slice(0,10); }
+function financeOpeningBalance(){ return Number(localStorage.getItem('sa_finance_opening_balance')||0); }
+function financeTotals(){
+  const incoming=(state.finance||[]).filter(x=>x.type==='PEMASUKAN').reduce((a,x)=>a+Number(x.amount||0),0);
+  const outgoing=(state.finance||[]).filter(x=>x.type==='PENGELUARAN').reduce((a,x)=>a+Number(x.amount||0),0);
+  const programOut=(state.finance||[]).filter(x=>x.type==='PENGELUARAN'&&x.category==='Pengeluaran Program').reduce((a,x)=>a+Number(x.amount||0),0);
+  const operationalOut=(state.finance||[]).filter(x=>x.type==='PENGELUARAN'&&['Operasional','Administrasi'].includes(x.category)).reduce((a,x)=>a+Number(x.amount||0),0);
+  const fundraisingIncome=(state.finance||[]).filter(x=>x.type==='PEMASUKAN'&&x.category==='Penghimpunan Dana').reduce((a,x)=>a+Number(x.amount||0),0);
+  return {incoming,outgoing,programOut,operationalOut,fundraisingIncome,balance:financeOpeningBalance()+incoming-outgoing};
+}
+function adminCounts(){
+  const rows=state.administration||[];
+  const today=new Date().toISOString().slice(0,10);
+  return {total:rows.length,process:rows.filter(x=>x.status==='PROSES').length,done:rows.filter(x=>x.status==='SELESAI').length,due:rows.filter(x=>x.dueDate&&x.dueDate<today&&x.status!=='SELESAI').length};
+}
+function supportProgramOptions(selected){
+  return state.programs.map(p=>`<option value="${esc(p.name)}" ${p.name===selected?'selected':''}>${esc(p.name)}</option>`).join('');
+}
+function supportFinanceProgramOptions(selected){
+  return `<option value="">-- Tanpa program --</option>`+state.programs.map(p=>`<option value="${esc(p.name)}" ${p.name===selected?'selected':''}>${esc(p.name)}</option>`).join('');
+}
+function administrationPage(){
+  const c=adminCounts();
+  return `<div class="module-page"><div class="page-head"><div><h1>Administrasi</h1><p>Pusat surat, dokumen, arsip, notulen, inventaris dan kebutuhan administrasi organisasi.</p></div><button class="btn btn-primary" onclick="openAdministration()">+ Tambah Data</button></div>
+  <div class="support-summary"><div class="support-mini"><small>Total Dokumen</small><strong>${c.total}</strong></div><div class="support-mini"><small>Dalam Proses</small><strong>${c.process}</strong></div><div class="support-mini"><small>Selesai</small><strong>${c.done}</strong></div><div class="support-mini"><small>Jatuh Tempo</small><strong>${c.due}</strong></div></div>
+  <div class="card" style="padding:16px">${moduleToolbar('Cari dokumen, kategori, program, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>ID</th><th>Judul</th><th>Kategori</th><th>Program</th><th>Status</th><th>Tanggal</th><th>PIC</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.administration.map(x=>`<tr data-search="${esc([x.id,x.title,x.category,x.program,x.status,x.pic,x.notes].join(' '))}"><td>${esc(x.id)}</td><td><strong>${esc(x.title)}</strong><br><small>${esc(x.notes||'')}</small></td><td>${esc(x.category)}</td><td>${esc(x.program||'-')}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.date||'-')}<br><small>Deadline: ${esc(x.dueDate||'-')}</small></td><td>${esc(x.pic||'-')}</td><td><button class="btn btn-secondary btn-small" onclick="openAdministration('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteAdministration('${x.id}')">Hapus</button></td></tr>`).join('')||'<tr><td colspan="8" class="empty">Belum ada data administrasi.</td></tr>'}</tbody></table></div></div></div>`;
+}
+function openAdministration(id){
+  const x=(state.administration||[]).find(a=>a.id===id)||{id:'',title:'',category:'Administrasi Program',program:'',status:'DRAFT',date:supportDate(),dueDate:'',pic:state.user?.name||'',link:'',notes:''};
+  const cats=['Surat','Administrasi Program','MoU / PKS','Notulen / BA','Inventaris','Arsip','Lainnya'];
+  const statuses=['DRAFT','PROSES','SELESAI','ARSIP'];
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Edit':'Tambah'} Administrasi</h2><div class="form-grid"><div class="field"><label>Judul / Nama Dokumen</label><input id="aTitle" value="${esc(x.title)}" placeholder="Contoh: Surat tugas kegiatan"></div><div class="field"><label>Kategori</label><select id="aCategory">${cats.map(v=>`<option ${v===x.category?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Program</label><input id="aProgram" list="adminProgramList" value="${esc(x.program||'')}" placeholder="Bisa ketik manual / custom"><datalist id="adminProgramList">${supportProgramOptions(x.program)}</datalist></div><div class="field"><label>Status</label><select id="aStatus">${statuses.map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Tanggal</label><input id="aDate" type="date" value="${esc(x.date||supportDate())}"></div><div class="field"><label>Deadline</label><input id="aDue" type="date" value="${esc(x.dueDate||'')}"></div><div class="field"><label>PIC</label><input id="aPic" value="${esc(x.pic||state.user?.name||'')}"></div><div class="field"><label>Link Dokumen</label><input id="aLink" value="${esc(x.link||'')}" placeholder="Google Drive / URL"></div><div class="field full"><label>Catatan</label><textarea id="aNotes" rows="3" placeholder="Catatan administratif">${esc(x.notes||'')}</textarea></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveAdministration('${id||''}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function saveAdministration(id){
+  const title=document.getElementById('aTitle').value.trim(); if(!title){toast('Judul dokumen wajib diisi.');return;}
+  const program=document.getElementById('aProgram').value.trim();
+  const data={id:id||'ADM-'+String(Date.now()).slice(-6),title,category:document.getElementById('aCategory').value,program,status:document.getElementById('aStatus').value,date:document.getElementById('aDate').value||supportDate(),dueDate:document.getElementById('aDue').value||'',pic:document.getElementById('aPic').value.trim()||state.user?.name||'',link:document.getElementById('aLink').value.trim(),notes:document.getElementById('aNotes').value.trim()};
+  const i=state.administration.findIndex(a=>a.id===data.id); if(i>=0)state.administration[i]=data; else state.administration.push(data); save(); closeModal(); showPage('administration'); toast('Data administrasi tersimpan ✅');
+}
+function deleteAdministration(id){ if(!confirm('Hapus data administrasi ini?'))return; state.administration=state.administration.filter(x=>x.id!==id); save(); showPage('administration'); toast('Data administrasi dihapus.'); }
+
+function financePage(){
+  const t=financeTotals();
+  return `<div class="module-page"><div class="page-head"><div><h1>Keuangan</h1><p>Arus kas organisasi: penghimpunan dana, pengeluaran program, operasional dan administrasi.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary" onclick="openFinanceOpening()">Atur Saldo Awal</button><button class="btn btn-secondary" onclick="syncFundraisingToFinance()">Tarik Fundraising</button><button class="btn btn-primary" onclick="openFinance()">+ Transaksi</button></div></div>
+  <div class="support-summary"><div class="support-mini"><small>Saldo Awal</small><strong>${rupiah(financeOpeningBalance())}</strong></div><div class="support-mini"><small>Total Pemasukan</small><strong>${rupiah(t.incoming)}</strong></div><div class="support-mini"><small>Total Pengeluaran</small><strong>${rupiah(t.outgoing)}</strong></div><div class="support-mini"><small>Saldo Akhir</small><strong>${rupiah(t.balance)}</strong></div></div>
+  <div class="finance-flow"><div class="flow-box"><small>Penghimpunan Dana</small><strong>${rupiah(t.fundraisingIncome)}</strong></div><div class="flow-box"><small>Pengeluaran Program</small><strong>${rupiah(t.programOut)}</strong></div><div class="flow-box"><small>Operasional + Administrasi</small><strong>${rupiah(t.operationalOut)}</strong></div></div>
+  <div class="card" style="padding:16px;margin-top:16px">${moduleToolbar('Cari tanggal, kategori, uraian, program, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Tanggal</th><th>Jenis</th><th>Kategori</th><th>Uraian</th><th>Program</th><th>Nominal</th><th>Akun</th><th>PIC</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.finance.map(x=>`<tr data-search="${esc([x.id,x.date,x.type,x.category,x.description,x.program,x.account,x.pic,x.notes].join(' '))}"><td>${esc(x.date)}</td><td><span class="badge ${x.type==='PEMASUKAN'?'b-green':'b-red'}">${esc(x.type)}</span></td><td>${esc(x.category)}</td><td><strong>${esc(x.description)}</strong><br><small>${esc(x.notes||'')}</small></td><td>${esc(x.program||'-')}</td><td><strong>${rupiah(x.amount)}</strong></td><td>${esc(x.account||'-')}</td><td>${esc(x.pic||'-')}</td><td><button class="btn btn-secondary btn-small" onclick="openFinance('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteFinance('${x.id}')">Hapus</button></td></tr>`).join('')||'<tr><td colspan="9" class="empty">Belum ada transaksi keuangan.</td></tr>'}</tbody></table></div></div></div>`;
+}
+function openFinance(id){
+  const x=(state.finance||[]).find(a=>a.id===id)||{id:'',date:supportDate(),type:'PEMASUKAN',category:'Penghimpunan Dana',description:'',program:'',amount:0,account:'Kas Utama',pic:state.user?.name||'',evidence:'',notes:'',sourceId:''};
+  const cats=['Penghimpunan Dana','Pengeluaran Program','Operasional','Administrasi','Lainnya'];
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Edit':'Tambah'} Transaksi Keuangan</h2><div class="form-grid"><div class="field"><label>Tanggal</label><input id="kDate" type="date" value="${esc(x.date||supportDate())}"></div><div class="field"><label>Jenis</label><select id="kType"><option ${x.type==='PEMASUKAN'?'selected':''}>PEMASUKAN</option><option ${x.type==='PENGELUARAN'?'selected':''}>PENGELUARAN</option></select></div><div class="field"><label>Kategori</label><select id="kCategory">${cats.map(v=>`<option ${v===x.category?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Nominal</label><input id="kAmount" inputmode="numeric" value="${esc(Number(x.amount||0))}" placeholder="Contoh: 5000000"></div><div class="field full"><label>Uraian</label><input id="kDescription" value="${esc(x.description||'')}" placeholder="Contoh: Penerimaan campaign / pembelian Al-Qur’an"></div><div class="field"><label>Program</label><input id="kProgram" list="financeProgramList" value="${esc(x.program||'')}" placeholder="Bisa ketik manual / custom"><datalist id="financeProgramList">${supportFinanceProgramOptions(x.program)}</datalist></div><div class="field"><label>Akun / Kas</label><input id="kAccount" value="${esc(x.account||'Kas Utama')}"></div><div class="field"><label>PIC</label><input id="kPic" value="${esc(x.pic||state.user?.name||'')}"></div><div class="field"><label>Bukti / Link</label><input id="kEvidence" value="${esc(x.evidence||'')}" placeholder="URL bukti transaksi"></div><div class="field full"><label>Catatan</label><textarea id="kNotes" rows="3">${esc(x.notes||'')}</textarea></div></div><div style="padding:9px 11px;border:1px solid #e7edf3;border-radius:9px;background:#f8fafc;font-size:11px;margin-top:4px">Pemasukan dan pengeluaran akan masuk ke rekap arus kas dan Pelaporan Terpadu.</div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveFinance('${id||''}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function saveFinance(id){
+  const desc=document.getElementById('kDescription').value.trim(); const amount=moneyNumber(document.getElementById('kAmount').value); if(!desc){toast('Uraian transaksi wajib diisi.');return} if(amount<=0){toast('Nominal harus lebih besar dari 0.');return}
+  const program=document.getElementById('kProgram').value.trim(); const programId=stage1ProgramId(program);
+  const data={id:id||'FIN-'+String(Date.now()).slice(-6),sourceId:(state.finance.find(a=>a.id===id)?.sourceId)||'',date:document.getElementById('kDate').value||supportDate(),type:document.getElementById('kType').value,category:document.getElementById('kCategory').value,description:desc,program,programId,amount,account:document.getElementById('kAccount').value.trim()||'Kas Utama',pic:document.getElementById('kPic').value.trim()||state.user?.name||'',evidence:document.getElementById('kEvidence').value.trim(),notes:document.getElementById('kNotes').value.trim()};
+  const i=state.finance.findIndex(a=>a.id===data.id); if(i>=0)state.finance[i]=data; else state.finance.push(data); save(); closeModal(); showPage('finance'); toast('Transaksi keuangan tersimpan ✅');
+}
+function deleteFinance(id){ if(!confirm('Hapus transaksi keuangan ini?'))return; state.finance=state.finance.filter(x=>x.id!==id); save(); showPage('finance'); toast('Transaksi dihapus.'); }
+function openFinanceOpening(){
+  const value=financeOpeningBalance();
+  document.getElementById('modalBox').innerHTML=`<h2>Saldo Awal Kas</h2><div class="field"><label>Saldo Awal</label><input id="kOpening" inputmode="numeric" value="${esc(value)}"></div><p style="font-size:11px;color:var(--muted)">Digunakan sebagai titik awal perhitungan saldo akhir pada modul Keuangan.</p><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveFinanceOpening()">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function saveFinanceOpening(){localStorage.setItem('sa_finance_opening_balance',String(moneyNumber(document.getElementById('kOpening').value)));save();closeModal();showPage('finance');toast('Saldo awal diperbarui ✅');}
+function syncFundraisingToFinance(){
+  let added=0;
+  (state.fundraising||[]).forEach(r=>{
+    if((state.finance||[]).some(f=>f.sourceId===r.id)) return;
+    state.finance.push({id:'FIN-FD-'+r.id,sourceId:r.id,date:r.date||supportDate(),type:'PEMASUKAN',category:'Penghimpunan Dana',description:r.campaign||'Fundraising',program:r.program||'',programId:r.programId||stage1ProgramId(r.program||''),amount:Number(r.amount||0),account:'Kas Fundraising',pic:r.pic||state.user?.name||'',evidence:'',notes:'Sinkron dari Penggalangan Dana'}); added++;
+  });
+  save(); showPage('finance'); toast(`${added} transaksi fundraising ditarik ke arus kas ✅`);
+}
+function exportFinanceCSV(){
+  const rows=[['Tanggal','Jenis','Kategori','Uraian','Program','Nominal','Akun','PIC','Bukti','Catatan']];
+  state.finance.forEach(x=>rows.push([x.date,x.type,x.category,x.description,x.program,x.amount,x.account,x.pic,x.evidence,x.notes]));
+  stage1Download(`arus-kas-${stage1Date()}.csv`,stage1CSV(rows),'text/csv;charset=utf-8');
+}
+
+/* Extend routing only; all existing pages/functions remain intact. */
+const _showPageBeforeSupport = showPage;
+showPage = function(page){
+  if(page==='administration'||page==='finance'){
+    if(!state.checkedIn){toast('Silakan check-in terlebih dahulu.');page='attendance';}
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+    const titles={administration:'Administrasi',finance:'Keuangan'};
+    document.getElementById('topTitle').textContent=titles[page]||'Support';
+    const el=document.getElementById('content');
+    if(page==='administration')el.innerHTML=administrationPage();
+    if(page==='finance')el.innerHTML=financePage();
+    document.getElementById('sidebar').classList.remove('open');
+    return;
+  }
+  _showPageBeforeSupport(page);
+};
+
+/* Import/backup extension: preserve prior JSON structure and add support data. */
+const _oldImportStage1JSON=importStage1JSON;
+importStage1JSON=function(evt){
+  const file=evt.target.files?.[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(){
+    try{
+      const data=JSON.parse(reader.result); if(data.schema!=='1.0') throw new Error('Schema tidak didukung');
+      ['programs','tasks','fundraising','content','crm','partnerships','documents','reports','attendance'].forEach(k=>{ if(data[k]!==undefined){ if(k==='content')state.contentItems=data[k]; else if(k==='attendance')state.attendanceRecords=data[k]; else state[k]=data[k]; }});
+      if(data.administration!==undefined)state.administration=data.administration;
+      if(data.finance!==undefined)state.finance=data.finance;
+      if(data.financeOpeningBalance!==undefined)localStorage.setItem('sa_finance_opening_balance',String(Number(data.financeOpeningBalance)||0));
+      if(data.dashboardTasks) data.dashboardTasks.forEach((x,i)=>{dashboardTasks[i]=x});
+      save(); toast('Backup lengkap berhasil diimport ✅'); showPage('reporting');
+    }catch(e){toast('File backup tidak valid.');}
+    evt.target.value='';
+  };
+  reader.readAsText(file);
+};
+
+/* Extend reporting summary without removing any previous metrics. */
+const _baseStage1IntegratedSummary=stage1IntegratedSummary;
+stage1IntegratedSummary=function(month,programId){
+  const s=_baseStage1IntegratedSummary(month,programId);
+  const byMonth=x=>!month || stage1Month(x.date)===month;
+  const byProgram=x=>!programId || x.programId===programId || stage1ProgramId(x.program)===programId;
+  const f=(state.finance||[]).filter(x=>byMonth(x)&&byProgram(x));
+  const a=(state.administration||[]).filter(x=>byMonth(x)&&byProgram(x));
+  s.financeIncome=f.filter(x=>x.type==='PEMASUKAN').reduce((sum,x)=>sum+Number(x.amount||0),0);
+  s.financeExpense=f.filter(x=>x.type==='PENGELUARAN').reduce((sum,x)=>sum+Number(x.amount||0),0);
+  s.financeProgramExpense=f.filter(x=>x.type==='PENGELUARAN'&&x.category==='Pengeluaran Program').reduce((sum,x)=>sum+Number(x.amount||0),0);
+  s.financeOperationalExpense=f.filter(x=>x.type==='PENGELUARAN'&&['Operasional','Administrasi'].includes(x.category)).reduce((sum,x)=>sum+Number(x.amount||0),0);
+  s.financeBalance=financeOpeningBalance()+s.financeIncome-s.financeExpense;
+  s.financeRecords=f.length;
+  s.adminRecords=a.length;
+  s.adminDone=a.filter(x=>x.status==='SELESAI').length;
+  s.adminInProcess=a.filter(x=>x.status==='PROSES').length;
+  s.adminOverdue=a.filter(x=>x.dueDate&&x.dueDate<stage1Date()&&x.status!=='SELESAI').length;
+  return s;
+};
+
+const _baseStage1AIReport=stage1AIReport;
+stage1AIReport=function(month,programId){
+  const out=_baseStage1AIReport(month,programId);
+  const s=out.s;
+  out.observations.push(`Keuangan mencatat ${rupiah(s.financeIncome)} pemasukan dan ${rupiah(s.financeExpense)} pengeluaran; saldo akhir berbasis saldo awal menjadi ${rupiah(s.financeBalance)}.`);
+  out.observations.push(`Administrasi memiliki ${s.adminRecords} dokumen pada filter, dengan ${s.adminDone} selesai dan ${s.adminInProcess} masih berproses.`);
+  if(s.financeProgramExpense>0) out.observations.push(`Pengeluaran program tercatat ${rupiah(s.financeProgramExpense)}, sementara operasional + administrasi ${rupiah(s.financeOperationalExpense)}.`);
+  if(s.adminOverdue>0) out.risks.push(`${s.adminOverdue} dokumen administrasi melewati deadline dan belum selesai.`);
+  if(s.financeBalance<0) out.risks.push('Saldo arus kas berada di bawah nol berdasarkan saldo awal dan transaksi yang tercatat.');
+  if(s.financeRecords===0) out.risks.push('Belum ada transaksi keuangan pada filter yang dipilih.');
+  out.actions.push('Rekonsiliasikan transaksi Penggalangan Dana ke Keuangan secara berkala agar arus kas selalu lengkap.');
+  out.actions.push('Tautkan dokumen administrasi ke Program atau transaksi penting agar audit trail lebih mudah.');
+  return out;
+};
+
+/* Add Support data to the existing integrated report while preserving previous report content. */
+const _baseReportingPage=reportingPage;
+reportingPage=function(){
+  const base=_baseReportingPage();
+  const month=localStorage.getItem('sa_report_month')||new Date().toISOString().slice(0,7);
+  const programId=localStorage.getItem('sa_report_program')||'';
+  const s=stage1IntegratedSummary(month,programId);
+  const t=financeTotals();
+  const c=adminCounts();
+  const supportSection=`<div class="card" style="padding:16px;margin-top:16px"><div class="section-title">Support: Administrasi & Keuangan</div><div class="support-summary"><div class="support-mini"><small>Arus Kas Masuk</small><strong>${rupiah(s.financeIncome)}</strong></div><div class="support-mini"><small>Arus Kas Keluar</small><strong>${rupiah(s.financeExpense)}</strong></div><div class="support-mini"><small>Saldo Akhir</small><strong>${rupiah(s.financeBalance)}</strong></div><div class="support-mini"><small>Dokumen Administrasi</small><strong>${c.total}</strong></div></div><div class="finance-flow"><div class="flow-box"><small>Pengeluaran Program</small><strong>${rupiah(s.financeProgramExpense)}</strong></div><div class="flow-box"><small>Operasional + Administrasi</small><strong>${rupiah(s.financeOperationalExpense)}</strong></div><div class="flow-box"><small>Dokumen Overdue</small><strong>${c.due}</strong></div></div></div>`;
+  return base+supportSection;
+};
+
+/* Export CSV extension: keep the previous export and add support metrics. */
+const _oldExportStage1CSV=exportStage1CSV;
+exportStage1CSV=function(){
+  const {month,programId}=stage1ReportFilters();
+  const s=stage1IntegratedSummary(month,programId);
+  const programName=programId?(state.programs.find(x=>x.id===programId)?.name||''):'Semua Program';
+  const rows=[['LAPORAN TERPADU SATU AMAL INDONESIA'],['Periode',month||'Semua'],['Program',programName],[],['METRIK','NILAI'],['Fundraising total',s.fundraising],['Program tercatat',s.programs.length],['Task total',s.tasks],['Task selesai',s.doneTasks],['Progress pekerjaan (%)',s.taskProgress],['Konten terbit',s.published],['Jangkauan konten',s.reach],['Donatur total (CRM)',s.donorTotal],['Follow-up CRM',s.followUp],['Kemitraan aktif',s.activePartners],['Pipeline kemitraan',s.pipeline],['Dokumentasi (jumlah file)',s.docs],['Record absensi',s.attendanceRecords],['Absensi lengkap',s.attendanceCompleted],['Donatur Baru',state.crm.filter(x=>x.segment==='Donatur Baru').length],['Donatur Berulang',state.crm.filter(x=>x.segment==='Donatur Berulang').length],['Donatur Istiqomah',state.crm.filter(x=>x.segment==='Donatur Istiqomah').length],['Akad Sedekah',state.crm.filter(x=>x.akadProgram==='Sedekah').length],['Akad Infak',state.crm.filter(x=>x.akadProgram==='Infak').length],['Akad Wakaf',state.crm.filter(x=>x.akadProgram==='Wakaf').length],['Akad Zakat',state.crm.filter(x=>x.akadProgram==='Zakat').length],[],['SUPPORT — ADMINISTRASI & KEUANGAN','NILAI'],['Arus kas masuk',s.financeIncome],['Arus kas keluar',s.financeExpense],['Saldo akhir',s.financeBalance],['Pengeluaran program',s.financeProgramExpense],['Operasional + administrasi',s.financeOperationalExpense],['Dokumen administrasi',s.adminRecords],['Dokumen selesai',s.adminDone],['Dokumen proses',s.adminInProcess],['Dokumen overdue',s.adminOverdue]];
+  stage1Download(`laporan-terpadu-${month||'semua'}.csv`,stage1CSV(rows),'text/csv;charset=utf-8'); toast('CSV rekap lengkap berhasil dibuat ✅');
+};
+
+/* Add quick exports to finance page without affecting the previous layout. */
+const _baseFinancePage=financePage;
+financePage=function(){
+  const html=_baseFinancePage();
+  return html.replace('<button class="btn btn-primary" onclick="openFinance()">+ Transaksi</button></div>', '<button class="btn btn-primary" onclick="openFinance()">+ Transaksi</button><button class="btn btn-secondary" onclick="exportFinanceCSV()">CSV Arus Kas</button></div>');
+};
+
+/* Ensure support data is included in the centralized snapshot immediately. */
+try{save();}catch(e){}
+
 
 </script>
 </body>
