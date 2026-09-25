@@ -2659,6 +2659,25 @@ try{save();}catch(e){}
 
 
 </script>
+<div id="recoveryModalV6" class="recovery-modal-v6 hidden">
+  <div class="recovery-card-v6">
+    <h2>Buat Password Baru</h2>
+    <p>Link pemulihan berhasil dibuka. Masukkan password baru untuk akun Satu Amal Indonesia.</p>
+    <div class="field">
+      <label>PASSWORD BARU</label>
+      <input id="recoveryPasswordV6" type="password" placeholder="Minimal 6 karakter" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>KONFIRMASI PASSWORD</label>
+      <input id="recoveryPasswordConfirmV6" type="password" placeholder="Ulangi password baru" autocomplete="new-password">
+    </div>
+    <div id="recoveryErrorV6" style="display:none;margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff3f3;color:#b42318;font-size:12px;line-height:1.5"></div>
+    <div class="recovery-actions-v6">
+      <button type="button" class="btn btn-primary" id="recoverySaveBtnV6" onclick="saveRecoveredPassword()">SIMPAN PASSWORD</button>
+    </div>
+  </div>
+</div>
+
   <!-- 1. Load library Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -2672,15 +2691,23 @@ try{save();}catch(e){}
     SUPABASE_PUBLISHABLE_KEY
   );
 
-  // Supabase Auth session listener: keep the app aware of the signed-in account.
+  function openRecoveryModal(){
+    const modal=document.getElementById('recoveryModalV6');
+    if(modal) modal.classList.remove('hidden');
+    setTimeout(()=>document.getElementById('recoveryPasswordV6')?.focus(),50);
+  }
+
+  // Supabase Auth session listener: show the password-reset form when recovery is opened.
   supabaseClient.auth.onAuthStateChange((event, session)=>{
     console.log('Supabase Auth:',event,session?.user?.email||'');
-    if(event === 'PASSWORD_RECOVERY'){
-      const modal=document.getElementById('recoveryModalV6');
-      if(modal) modal.classList.remove('hidden');
-      document.getElementById('recoveryPasswordV6')?.focus();
-    }
+    if(event === 'PASSWORD_RECOVERY') openRecoveryModal();
   });
+
+  // Fallback: if the recovery event happened before the listener/UI finished initializing,
+  // show the recovery form when the page hash indicates an auth recovery callback.
+  if(location.hash.includes('type=recovery') || location.hash.includes('code=')){
+    setTimeout(()=>openRecoveryModal(),150);
+  }
 
   async function sendRecoveryEmail(){
     const email=(document.getElementById('loginEmail')?.value||'').trim();
@@ -2725,24 +2752,6 @@ try{save();}catch(e){}
   }
 </script>
 
-<div id="recoveryModalV6" class="recovery-modal-v6 hidden">
-  <div class="recovery-card-v6">
-    <h2>Buat Password Baru</h2>
-    <p>Link pemulihan berhasil dibuka. Masukkan password baru untuk akun Satu Amal Indonesia.</p>
-    <div class="field">
-      <label>PASSWORD BARU</label>
-      <input id="recoveryPasswordV6" type="password" placeholder="Minimal 6 karakter" autocomplete="new-password">
-    </div>
-    <div class="field">
-      <label>KONFIRMASI PASSWORD</label>
-      <input id="recoveryPasswordConfirmV6" type="password" placeholder="Ulangi password baru" autocomplete="new-password">
-    </div>
-    <div id="recoveryErrorV6" style="display:none;margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff3f3;color:#b42318;font-size:12px;line-height:1.5"></div>
-    <div class="recovery-actions-v6">
-      <button type="button" class="btn btn-primary" id="recoverySaveBtnV6" onclick="saveRecoveredPassword()">SIMPAN PASSWORD</button>
-    </div>
-  </div>
-</div>
 
 </body>
 </html>
