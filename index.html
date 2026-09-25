@@ -2174,10 +2174,159 @@ function openContent(id){const x=state.contentItems.find(a=>a.id===id)||{id:'CNT
 function saveContent(id){const title=document.getElementById('cTitle').value.trim();if(!title){toast('Judul konten wajib diisi.');return}const data={id:id||'CNT-'+String(Date.now()).slice(-6),title,program:document.getElementById('cProgram').value,type:document.getElementById('cType').value,channel:document.getElementById('cChannel').value,status:document.getElementById('cStatus').value,pic:document.getElementById('cPic').value.trim()||state.user.name,publishDate:document.getElementById('cDate').value||dateId(),reach:moneyNumber(document.getElementById('cReach').value)};const i=state.contentItems.findIndex(a=>a.id===data.id);if(i>=0)state.contentItems[i]=data;else state.contentItems.push(data);save();closeModal();showPage('content');toast('Konten tersimpan ✅')}
 function deleteContent(id){if(!confirm('Hapus konten ini?'))return;state.contentItems=state.contentItems.filter(x=>x.id!==id);save();showPage('content');toast('Konten dihapus.')}
 
-function fundraisingPage(){const total=fundraisingTotal(), tx=state.fundraising.length, avg=tx?total/tx:0;return `<div class="module-page"><div class="page-head"><div><h1>Penggalangan Dana</h1><p>Catat penghimpunan dana per kampanye, kanal, donor dan PIC.</p></div><button class="btn btn-primary" onclick="openFundraising()">+ Tambah Transaksi</button></div><div class="grid kpis">${kpiPlain('Total Terkumpul',rupiah(total),'Semua transaksi')}${kpiPlain('Transaksi',String(tx),'Tercatat')}${kpiPlain('Rata-rata',rupiah(avg),'Per transaksi')}${kpiPlain('Target Tahunan','Rp6 M','Target internal')}</div><div class="card" style="margin-top:16px;padding:16px">${moduleToolbar('Cari kampanye, donor, kanal...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Kampanye</th><th>Donor</th><th>Kanal</th><th>Nominal</th><th>Status</th><th>Tanggal</th><th>PIC</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.fundraising.map(x=>`<tr data-search="${esc([x.campaign,x.donor,x.channel,x.status,x.pic].join(' '))}"><td><strong>${esc(x.campaign)}</strong><br><small>${esc(x.id)}</small></td><td>${esc(x.donor)}</td><td>${esc(x.channel)}</td><td>${rupiah(x.amount)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.date)}</td><td>${esc(x.pic)}</td><td><button class="btn btn-secondary btn-small" onclick="openFundraising('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteFundraising('${x.id}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`}
-function openFundraising(id){const x=state.fundraising.find(a=>a.id===id)||{id:'FD-'+String(Date.now()).slice(-6),campaign:'',donor:'',channel:'Social Media',amount:0,status:'MASUK',date:dateId(),pic:state.user.name};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Transaksi</h2><div class="form-grid"><div class="field"><label>Kampanye</label><input id="fCampaign" value="${esc(x.campaign)}"></div><div class="field"><label>Donor</label><input id="fDonor" value="${esc(x.donor)}"></div><div class="field"><label>Kanal</label><select id="fChannel">${['Kemitraan','IVC','Galang Dana','Social Media','CRM','Volunteer','Tim Manajemen','Lainnya'].map(v=>`<option ${v===x.channel?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="fStatus">${['MASUK','PENDING','REFUND'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Nominal (Rp)</label><input id="fAmount" type="number" min="0" value="${Number(x.amount)||0}"></div><div class="field"><label>Tanggal</label><input id="fDate" type="date" value="${esc(x.date)}"></div><div class="field"><label>PIC</label><input id="fPic" value="${esc(x.pic)}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveFundraising('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
-function saveFundraising(id){const campaign=document.getElementById('fCampaign').value.trim(),donor=document.getElementById('fDonor').value.trim();if(!campaign||!donor){toast('Kampanye dan donor wajib diisi.');return}const data={id:id||'FD-'+String(Date.now()).slice(-6),campaign,donor,channel:document.getElementById('fChannel').value,amount:moneyNumber(document.getElementById('fAmount').value),status:document.getElementById('fStatus').value,date:document.getElementById('fDate').value||dateId(),pic:document.getElementById('fPic').value.trim()||state.user.name};const i=state.fundraising.findIndex(a=>a.id===data.id);if(i>=0)state.fundraising[i]=data;else state.fundraising.push(data);save();closeModal();showPage('fundraising');toast('Transaksi fundraising tersimpan ✅')}
-function deleteFundraising(id){if(!confirm('Hapus transaksi ini?'))return;state.fundraising=state.fundraising.filter(x=>x.id!==id);save();showPage('fundraising');toast('Transaksi dihapus.')}
+let fundraisingRemoteReady=false;
+let fundraisingSyncBusy=false;
+
+function fundraisingRemoteRowToState(r){
+  const pid=r.program_id||'';
+  const programName=r.program_name||state.programs.find(p=>p.supabaseId===pid||p.id===pid)?.name||'';
+  return {
+    id:r.transaction_code||('FD-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    code:r.transaction_code||'',
+    campaign:r.campaign_name||r.source_type||'',
+    donor:r.donor_name||'',
+    donorId:r.donor_id||'',
+    channel:r.channel||'Lainnya',
+    amount:Number(r.amount||0),
+    status:r.status||'MASUK',
+    date:r.transaction_date||dateId(),
+    pic:r.pic_name||(r.pic_id===state.user?.id?state.user?.name:'')||'PIC',
+    picId:r.pic_id||'',
+    program:programName,
+    programId:pid,
+    notes:r.notes||''
+  };
+}
+
+function localFundraisingPayload(x,userId){
+  const p=state.programs.find(a=>a.id===x.programId||a.name===x.program||a.supabaseId===x.programId);
+  return {
+    transaction_code:x.code||x.id,
+    transaction_date:x.date||dateId(),
+    donor_id:x.donorId||null,
+    program_id:p?.supabaseId||x.programId||null,
+    channel:x.channel||'Lainnya',
+    source_type:x.campaign||null,
+    akad_program:null,
+    amount:Math.max(0,Number(x.amount)||0),
+    status:x.status||'MASUK',
+    pic_id:x.picId||userId,
+    notes:x.notes||null,
+    campaign_name:x.campaign||null,
+    donor_name:x.donor||null,
+    pic_name:x.pic||'',
+    program_name:p?.name||x.program||null
+  };
+}
+
+async function syncFundraisingFromSupabase(){
+  if(fundraisingSyncBusy||fundraisingRemoteReady)return;
+  fundraisingSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('fundraising_transactions')
+      .select('id,transaction_code,transaction_date,donor_id,program_id,channel,source_type,akad_program,amount,status,pic_id,notes,campaign_name,donor_name,pic_name,program_name,created_at,updated_at')
+      .order('transaction_date',{ascending:false});
+    if(error)throw error;
+    if(!remote||remote.length===0){
+      const locals=(state.fundraising||[]).filter(x=>x?.campaign||x?.donor||Number(x?.amount||0)>0);
+      if(locals.length){
+        const payload=locals.map(x=>localFundraisingPayload(x,user.id));
+        const {error:insertError}=await supabaseClient.from('fundraising_transactions').upsert(payload,{onConflict:'transaction_code'});
+        if(insertError)throw insertError;
+        const {data:seeded,error:seedError}=await supabaseClient
+          .from('fundraising_transactions')
+          .select('id,transaction_code,transaction_date,donor_id,program_id,channel,source_type,akad_program,amount,status,pic_id,notes,campaign_name,donor_name,pic_name,program_name,created_at,updated_at')
+          .order('transaction_date',{ascending:false});
+        if(seedError)throw seedError;
+        state.fundraising=(seeded||[]).map(fundraisingRemoteRowToState);
+      }else{
+        state.fundraising=[];
+      }
+    }else{
+      state.fundraising=remote.map(fundraisingRemoteRowToState);
+    }
+    localStorage.setItem('sa_fundraising_supabase_loaded','true');
+    save();
+    fundraisingRemoteReady=true;
+    if(document.getElementById('topTitle')?.textContent==='Penggalangan Dana')showPage('fundraising');
+    toast('Data Penggalangan Dana tersinkron ke Supabase ✅');
+  }catch(err){
+    console.error('Fundraising sync error',err);
+    toast('Penggalangan Dana online gagal dimuat: '+(err?.message||'Unknown error'));
+  }finally{fundraisingSyncBusy=false;}
+}
+
+function fundraisingPage(){
+  if(!fundraisingRemoteReady)setTimeout(syncFundraisingFromSupabase,0);
+  const total=fundraisingTotal(), tx=state.fundraising.length, avg=tx?total/tx:0;
+  return `<div class="module-page"><div class="page-head"><div><h1>Penggalangan Dana</h1><p>Catat penghimpunan dana per kampanye, kanal, donor, program dan PIC.</p></div><button class="btn btn-primary" onclick="openFundraising()">+ Tambah Transaksi</button></div><div class="grid kpis">${kpiPlain('Total Terkumpul',rupiah(total),'Semua transaksi')}${kpiPlain('Transaksi',String(tx),'Tercatat')}${kpiPlain('Rata-rata',rupiah(avg),'Per transaksi')}${kpiPlain('Target Tahunan','Rp6 M','Target internal')}</div><div class="card" style="margin-top:16px;padding:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Data tersimpan di Supabase</div>${moduleToolbar('Cari kampanye, donor, kanal, program...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Kampanye</th><th>Donor</th><th>Program</th><th>Kanal</th><th>Nominal</th><th>Status</th><th>Tanggal</th><th>PIC</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.fundraising.map(x=>`<tr data-search="${esc([x.campaign,x.donor,x.program,x.channel,x.status,x.pic].join(' '))}"><td><strong>${esc(x.campaign)}</strong><br><small>${esc(x.id)}</small></td><td>${esc(x.donor)}</td><td>${esc(x.program||'-')}</td><td>${esc(x.channel)}</td><td>${rupiah(x.amount)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.date)}</td><td>${esc(x.pic)}</td><td><button class="btn btn-secondary btn-small" onclick="openFundraising('${esc(x.id)}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteFundraising('${esc(x.id)}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`;
+}
+
+function openFundraising(id){
+  const x=state.fundraising.find(a=>a.id===id)||{id:'FD-'+String(Date.now()).slice(-6),campaign:'',donor:'',program:'',programId:'',channel:'Social Media',amount:0,status:'MASUK',date:dateId(),pic:state.user?.name||'Admin Satu Amal'};
+  const programOptions=state.programs.map(p=>`<option value="${esc(p.name)}" ${p.name===(x.program||'')?'selected':''}>${esc(p.name)}</option>`).join('');
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Transaksi</h2><div class="form-grid"><div class="field"><label>Kampanye</label><input id="fCampaign" value="${esc(x.campaign)}"></div><div class="field"><label>Donor</label><input id="fDonor" value="${esc(x.donor)}"></div><div class="field"><label>Program</label><input id="fProgram" list="fundraisingPrograms" value="${esc(x.program||'')}" placeholder="Pilih atau ketik manual"><datalist id="fundraisingPrograms">${programOptions}</datalist></div><div class="field"><label>Kanal</label><select id="fChannel">${['Kemitraan','IVC','Galang Dana','Social Media','CRM','Volunteer','Tim Manajemen','Lainnya'].map(v=>`<option ${v===x.channel?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="fStatus">${['MASUK','PENDING','REFUND'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Nominal (Rp)</label><input id="fAmount" type="number" min="0" value="${Number(x.amount)||0}"></div><div class="field"><label>Tanggal</label><input id="fDate" type="date" value="${esc(x.date)}"></div><div class="field"><label>PIC</label><input id="fPic" value="${esc(x.pic||state.user?.name||'')}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveFundraising('${esc(id||'')}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function saveFundraising(id){
+  const campaign=document.getElementById('fCampaign').value.trim(), donor=document.getElementById('fDonor').value.trim();
+  if(!campaign||!donor){toast('Kampanye dan donor wajib diisi.');return}
+  try{
+    const user=await getProgramSession();
+    const existing=state.fundraising.find(a=>a.id===id);
+    const programName=document.getElementById('fProgram').value.trim();
+    const program=state.programs.find(p=>p.name===programName);
+    const data={
+      id:id||'FD-'+String(Date.now()).slice(-6),
+      campaign,donor,channel:document.getElementById('fChannel').value,
+      amount:moneyNumber(document.getElementById('fAmount').value),
+      status:document.getElementById('fStatus').value,
+      date:document.getElementById('fDate').value||dateId(),
+      pic:document.getElementById('fPic').value.trim()||state.user?.name||'Admin Satu Amal',
+      program:programName,programId:program?.supabaseId||'',donorId:existing?.donorId||'',supabaseId:existing?.supabaseId||'',
+      notes:existing?.notes||''
+    };
+    const payload=localFundraisingPayload(data,user.id);
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('fundraising_transactions').update(payload).eq('id',existing.supabaseId).select('id,transaction_code,transaction_date,donor_id,program_id,channel,source_type,akad_program,amount,status,pic_id,notes,campaign_name,donor_name,pic_name,program_name,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('fundraising_transactions').upsert(payload,{onConflict:'transaction_code'}).select('id,transaction_code,transaction_date,donor_id,program_id,channel,source_type,akad_program,amount,status,pic_id,notes,campaign_name,donor_name,pic_name,program_name,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+    const mapped=fundraisingRemoteRowToState(remote);
+    const idx=state.fundraising.findIndex(a=>a.id===id);
+    if(idx>=0)state.fundraising[idx]=mapped;else state.fundraising.unshift(mapped);
+    save();fundraisingRemoteReady=true;closeModal();showPage('fundraising');toast('Transaksi fundraising tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveFundraising error',err);
+    toast('Gagal menyimpan fundraising: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteFundraising(id){
+  if(!confirm('Hapus transaksi ini?'))return;
+  const x=state.fundraising.find(a=>a.id===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('fundraising_transactions').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.code){
+      const {error}=await supabaseClient.from('fundraising_transactions').delete().eq('transaction_code',x.code);
+      if(error)throw error;
+    }
+    state.fundraising=state.fundraising.filter(a=>a.id!==id);save();showPage('fundraising');toast('Transaksi fundraising dihapus dari Supabase.');
+  }catch(err){
+    console.error('deleteFundraising error',err);
+    toast('Gagal menghapus fundraising: '+(err?.message||'Unknown error'));
+  }
+}
 
 function crmPage(){const total=state.crm.reduce((a,x)=>a+Number(x.totalDonation||0),0);return `<div class="module-page"><div class="page-head"><div><h1>CRM / Donor</h1><p>Kelola database donor, riwayat kontribusi, segmentasi dan follow-up.</p></div><button class="btn btn-primary" onclick="openCRM()">+ Tambah Donor</button></div><div class="grid kpis">${kpiPlain('Total Data',String(state.crm.length),'Donor / entitas')}${kpiPlain('Donatur Baru',String(state.crm.filter(x=>x.segment==='Donatur Baru').length),'Segmentasi')}${kpiPlain('Donatur Berulang',String(state.crm.filter(x=>x.segment==='Donatur Berulang').length),'Segmentasi')}${kpiPlain('Donatur Istiqomah',String(state.crm.filter(x=>x.segment==='Donatur Istiqomah').length),'Segmentasi')}${kpiPlain('Follow-up',String(crmPending()),'Perlu tindakan')}${kpiPlain('Total Donasi',rupiah(total),'Database')}</div><div class="card" style="margin-top:16px;padding:16px">${moduleToolbar('Cari nama, segmen, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Nama</th><th>Kontak</th><th>Segmen</th><th>Akad Program</th><th>Total Donasi</th><th>Status</th><th>Last Donation</th><th>Follow-up</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.crm.map(x=>`<tr data-search="${esc([x.name,x.phone,x.segment,x.status,x.pic].join(' '))}"><td><strong>${esc(x.name)}</strong><br><small>${esc(x.id)} · ${esc(x.pic)}</small></td><td>${esc(x.phone||'-')}</td><td>${esc(x.segment)}</td><td>${esc(x.akadProgram||'-')}</td><td>${rupiah(x.totalDonation)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.lastDonation||'-')}</td><td>${esc(x.followUp||'-')}</td><td><button class="btn btn-secondary btn-small" onclick="openCRM('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteCRM('${x.id}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`}
 function openCRM(id){const x=state.crm.find(a=>a.id===id)||{id:'CRM-'+String(Date.now()).slice(-6),name:'',phone:'',segment:'Donatur Baru',akadProgram:'Sedekah',totalDonation:0,lastDonation:'',status:'AKTIF',pic:state.user.name,followUp:dateId()};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Donor</h2><div class="form-grid"><div class="field"><label>Nama / Entitas</label><input id="rName" value="${esc(x.name)}"></div><div class="field"><label>No. HP / Kontak</label><input id="rPhone" value="${esc(x.phone)}"></div><div class="field"><label>Segmen Donatur</label><select id="rSegment">${['Donatur Baru','Donatur Berulang','Donatur Istiqomah'].map(v=>`<option ${v===x.segment?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Akad Program</label><select id="rAkad">${['Sedekah','Infak','Wakaf','Zakat'].map(v=>`<option ${v===x.akadProgram?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="rStatus">${['AKTIF','FOLLOW-UP','PERLU DATA','NONAKTIF'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Total Donasi (Rp)</label><input id="rTotal" type="number" min="0" value="${Number(x.totalDonation)||0}"></div><div class="field"><label>Donasi Terakhir</label><input id="rLast" type="date" value="${esc(x.lastDonation)}"></div><div class="field"><label>Follow-up Berikutnya</label><input id="rFollow" type="date" value="${esc(x.followUp)}"></div><div class="field"><label>PIC</label><input id="rPic" value="${esc(x.pic)}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveCRM('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
