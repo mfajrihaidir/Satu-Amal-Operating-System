@@ -4016,5 +4016,235 @@ showPage=function(page){
 setTimeout(()=>{try{syncAdministrationsFromSupabase();}catch(e){}},900);
 </script>
 
+
+<script>
+/* ================= STAGE 2 / KEUANGAN → SUPABASE ================= */
+let financeRemoteReady=false;
+let financeSyncBusy=false;
+
+function getFinanceSession(){
+  return supabaseClient.auth.getSession().then(({data})=>data?.session||null);
+}
+
+function financeRemoteRowToState(r){
+  const programName=(state.programs||[]).find(p=>(p.supabaseId||p.id)===r.program_id)?.name||'';
+  return {
+    id:r.transaction_code||('FIN-'+String(r.id||'').slice(0,8)),
+    supabaseId:r.id,
+    sourceId:r.source_code||r.fundraising_transaction_id||'',
+    date:r.transaction_date||supportDate(),
+    type:r.flow_type==='IN'?'PEMASUKAN':'PENGELUARAN',
+    category:r.category||'Lainnya',
+    subcategory:r.subcategory||'',
+    description:r.description||'',
+    program:programName,
+    programId:r.program_id||'',
+    amount:Number(r.amount||0),
+    account:r.account||'Kas Utama',
+    pic:r.pic_name||'',
+    picId:r.pic_id||'',
+    evidence:r.proof_url||'',
+    notes:r.notes||''
+  };
+}
+
+function localFinancePayload(x,userId){
+  const program=(state.programs||[]).find(p=>p.name===x.program || (p.supabaseId||p.id)===x.programId);
+  const programId=program?.supabaseId||program?.id||x.programId||null;
+  const type=x.type==='PEMASUKAN'?'IN':'OUT';
+  return {
+    transaction_code:x.id||('FIN-'+Date.now()),
+    transaction_date:x.date||supportDate(),
+    flow_type:type,
+    category:x.category||'Lainnya',
+    subcategory:x.subcategory||null,
+    program_id:programId||null,
+    fundraising_transaction_id:x.fundraisingSupabaseId||null,
+    amount:Number(x.amount||0),
+    description:x.description||'',
+    proof_url:x.evidence||null,
+    pic_id:x.picId||userId||null,
+    pic_name:x.pic||state.user?.name||'',
+    account:x.account||'Kas Utama',
+    notes:x.notes||null,
+    source_code:x.sourceId||null
+  };
+}
+
+async function syncFinanceFromSupabase(){
+  if(financeSyncBusy)return;
+  const session=await getFinanceSession();
+  if(!session?.user)return;
+  financeSyncBusy=true;
+  try{
+    const {data,error}=await supabaseClient.from('cash_flows')
+      .select('id,transaction_code,transaction_date,flow_type,category,subcategory,program_id,fundraising_transaction_id,amount,description,proof_url,pic_id,pic_name,account,notes,source_code,created_at,updated_at')
+      .order('transaction_date',{ascending:false}).order('created_at',{ascending:false});
+    if(error)throw error;
+    const rows=data||[];
+
+    /* First-time seed: preserve any existing local Stage 1 transactions when remote is empty. */
+    if(rows.length===0 && Array.isArray(state.finance) && state.finance.length){
+      const payload=state.finance.map(x=>localFinancePayload(x,session.user.id));
+      const {error:seedError}=await supabaseClient.from('cash_flows').upsert(payload,{onConflict:'transaction_code'});
+      if(seedError)throw seedError;
+      const {data:seeded,error:seedReadError}=await supabaseClient.from('cash_flows')
+        .select('id,transaction_code,transaction_date,flow_type,category,subcategory,program_id,fundraising_transaction_id,amount,description,proof_url,pic_id,pic_name,account,notes,source_code,created_at,updated_at')
+        .order('transaction_date',{ascending:false}).order('created_at',{ascending:false});
+      if(seedReadError)throw seedReadError;
+      state.finance=(seeded||[]).map(financeRemoteRowToState);
+    }else{
+      state.finance=rows.map(financeRemoteRowToState);
+    }
+    save();
+    financeRemoteReady=true;
+  }catch(err){
+    console.error('syncFinanceFromSupabase error',err);
+    toast('Gagal memuat Keuangan dari Supabase: '+(err?.message||'Unknown error'));
+  }finally{financeSyncBusy=false;}
+}
+
+/* Replace finance save with Supabase-backed CRUD while keeping the original UI. */
+async function saveFinanceRemote(id){
+  const session=await getFinanceSession();
+  if(!session?.user){toast('Sesi login tidak ditemukan.');return;}
+  const desc=document.getElementById('kDescription')?.value.trim()||'';
+  const amount=moneyNumber(document.getElementById('kAmount')?.value||0);
+  if(!desc){toast('Uraian transaksi wajib diisi.');return;}
+  if(amount<=0){toast('Nominal harus lebih besar dari 0.');return;}
+
+  const existing=(state.finance||[]).find(a=>a.id===id || a.supabaseId===id);
+  const program=document.getElementById('kProgram')?.value.trim()||'';
+  const p=(state.programs||[]).find(a=>a.name===program);
+  const data={
+    id:existing?.id||id||'FIN-'+String(Date.now()).slice(-6),
+    supabaseId:existing?.supabaseId||'',
+    sourceId:existing?.sourceId||'',
+    fundraisingSupabaseId:existing?.fundraisingSupabaseId||null,
+    date:document.getElementById('kDate')?.value||supportDate(),
+    type:document.getElementById('kType')?.value||'PEMASUKAN',
+    category:document.getElementById('kCategory')?.value||'Lainnya',
+    subcategory:existing?.subcategory||'',
+    description:desc,
+    program,
+    programId:p?.supabaseId||p?.id||'',
+    amount,
+    account:document.getElementById('kAccount')?.value.trim()||'Kas Utama',
+    pic:document.getElementById('kPic')?.value.trim()||state.user?.name||'',
+    picId:existing?.picId||session.user.id,
+    evidence:document.getElementById('kEvidence')?.value.trim()||'',
+    notes:document.getElementById('kNotes')?.value.trim()||''
+  };
+
+  try{
+    const payload=localFinancePayload(data,session.user.id);
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('cash_flows').update(payload).eq('id',existing.supabaseId)
+        .select('id,transaction_code,transaction_date,flow_type,category,subcategory,program_id,fundraising_transaction_id,amount,description,proof_url,pic_id,pic_name,account,notes,source_code,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('cash_flows').upsert(payload,{onConflict:'transaction_code'})
+        .select('id,transaction_code,transaction_date,flow_type,category,subcategory,program_id,fundraising_transaction_id,amount,description,proof_url,pic_id,pic_name,account,notes,source_code,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+    const mapped=financeRemoteRowToState(remote);
+    const idx=(state.finance||[]).findIndex(x=>x.id===id||x.supabaseId===existing?.supabaseId||x.id===mapped.id);
+    if(idx>=0)state.finance[idx]=mapped;else state.finance.unshift(mapped);
+    save();financeRemoteReady=true;closeModal();showPage('finance');toast('Transaksi keuangan tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveFinanceRemote error',err);
+    toast('Gagal menyimpan Keuangan: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteFinanceRemote(id){
+  if(!confirm('Hapus transaksi keuangan ini?'))return;
+  const x=(state.finance||[]).find(a=>a.id===id||a.supabaseId===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('cash_flows').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.id){
+      const {error}=await supabaseClient.from('cash_flows').delete().eq('transaction_code',x.id);
+      if(error)throw error;
+    }
+    state.finance=(state.finance||[]).filter(a=>a.id!==id&&a.supabaseId!==id);
+    save();financeRemoteReady=true;showPage('finance');toast('Transaksi keuangan dihapus dari Supabase ✅');
+  }catch(err){
+    console.error('deleteFinanceRemote error',err);
+    toast('Gagal menghapus Keuangan: '+(err?.message||'Unknown error'));
+  }
+}
+
+/* Rebuild the fundraising pull so it reads the online fundraising table first. */
+async function syncFundraisingToFinance(){
+  const session=await getFinanceSession();
+  if(!session?.user){toast('Sesi login tidak ditemukan.');return;}
+  try{
+    const {data,error}=await supabaseClient.from('fundraising_transactions')
+      .select('id,transaction_code,transaction_date,program_id,amount,pic_id')
+      .order('transaction_date',{ascending:true});
+    if(error)throw error;
+    let added=0;
+    for(const r of (data||[])){
+      const exists=(state.finance||[]).some(f=>f.fundraisingSupabaseId===r.id || f.sourceId===r.transaction_code);
+      if(exists)continue;
+      const p=(state.programs||[]).find(x=>(x.supabaseId||x.id)===r.program_id);
+      const payload={
+        transaction_code:'FIN-FD-'+r.id,
+        transaction_date:r.transaction_date||supportDate(),
+        flow_type:'IN',
+        category:'Penghimpunan Dana',
+        subcategory:'Fundraising',
+        program_id:r.program_id||null,
+        fundraising_transaction_id:r.id,
+        amount:Number(r.amount||0),
+        description:'Fundraising '+(r.transaction_code||''),
+        proof_url:null,
+        pic_id:r.pic_id||session.user.id,
+        pic_name:state.user?.name||'Admin Satu Amal',
+        account:'Kas Fundraising',
+        notes:'Sinkron dari Penggalangan Dana',
+        source_code:r.transaction_code||r.id
+      };
+      const {error:upsertError}=await supabaseClient.from('cash_flows').upsert(payload,{onConflict:'transaction_code'});
+      if(upsertError)throw upsertError;
+      added++;
+    }
+    await syncFinanceFromSupabase();
+    showPage('finance');toast(`${added} transaksi fundraising ditarik ke Keuangan ✅`);
+  }catch(err){
+    console.error('syncFundraisingToFinance remote error',err);
+    toast('Gagal menarik Fundraising: '+(err?.message||'Unknown error'));
+  }
+}
+
+/* Keep the existing finance UI, but route its CRUD to Supabase. */
+const _openFinanceLocal=typeof openFinance==='function'?openFinance:null;
+const _showPageBeforeFinanceRemote=showPage;
+showPage=function(page){
+  if(page==='finance'){
+    if(!state.checkedIn){toast('Silakan check-in terlebih dahulu.');page='attendance';}
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+    if(page==='finance'){
+      document.getElementById('topTitle').textContent='Keuangan';
+      document.getElementById('content').innerHTML=financePage();
+      document.getElementById('sidebar').classList.remove('open');
+      syncFinanceFromSupabase();
+      return;
+    }
+  }
+  _showPageBeforeFinanceRemote(page);
+};
+
+/* Override save/delete only; modal layout from Stage 1 remains unchanged. */
+window.saveFinance=saveFinanceRemote;
+window.deleteFinance=deleteFinanceRemote;
+
+setTimeout(()=>{try{syncFinanceFromSupabase();}catch(e){}},1100);
+</script>
+
 </body>
 </html>
