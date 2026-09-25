@@ -3848,5 +3848,173 @@ async function deleteDoc(id){
 }
 </script>
 
+
+<!-- STAGE 2 — ADMINISTRASI → SUPABASE -->
+<script>
+let adminRemoteReady=false;
+let adminSyncBusy=false;
+
+function adminRemoteRowToState(r){
+  const programId=r.program_id||'';
+  const linkedProgram=state.programs.find(p=>p.supabaseId===programId||p.id===programId);
+  const programName=r.custom_program_name||linkedProgram?.name||'';
+  return {
+    id:r.code || ('ADM-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    code:r.code||'',
+    title:r.title||'',
+    category:r.admin_type||'Administrasi Program',
+    program:programName,
+    programId:programId,
+    status:r.status||'DRAFT',
+    date:r.document_date||r.created_at?.slice(0,10)||dateId(),
+    dueDate:r.due_date||'',
+    picId:r.pic_id||'',
+    pic:r.pic_name||(r.pic_id===state.user?.id?state.user?.name:'')||'PIC',
+    link:r.document_url||'',
+    notes:r.notes||''
+  };
+}
+
+function localAdminPayload(x,userId){
+  const p=state.programs.find(a=>a.id===x.programId||a.name===x.program||a.supabaseId===x.programId);
+  return {
+    ...(x.supabaseId?{id:x.supabaseId}:{}),
+    code:x.code||x.id,
+    title:x.title||'',
+    admin_type:x.category||'Administrasi Program',
+    program_id:p?.supabaseId||x.programId||null,
+    custom_program_name:(!p&&x.program)?x.program:null,
+    status:x.status||'DRAFT',
+    document_date:x.date||dateId(),
+    due_date:x.dueDate||null,
+    pic_id:x.picId||userId,
+    pic_name:x.pic||state.user?.name||'',
+    document_url:x.link||null,
+    notes:x.notes||null
+  };
+}
+
+async function syncAdministrationsFromSupabase(){
+  if(adminSyncBusy||adminRemoteReady)return;
+  adminSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('administration')
+      .select('id,code,title,admin_type,program_id,custom_program_name,status,document_date,due_date,pic_id,pic_name,document_url,notes,created_at,updated_at')
+      .order('document_date',{ascending:false,nullsLast:true})
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+
+    if(!remote||remote.length===0){
+      const locals=(state.administration||[]).filter(x=>x?.title);
+      if(locals.length){
+        const payload=locals.map(x=>localAdminPayload(x,user.id));
+        const {error:insertError}=await supabaseClient.from('administration').upsert(payload,{onConflict:'code'});
+        if(insertError)throw insertError;
+      }
+      adminRemoteReady=true;
+      return;
+    }
+
+    state.administration=remote.map(adminRemoteRowToState);
+    adminRemoteReady=true;
+    try{save();}catch(e){console.warn('admin local cache save failed',e)}
+    if(document.getElementById('topTitle')?.textContent==='Administrasi')showPage('administration');
+  }catch(err){
+    console.error('syncAdministrationsFromSupabase error',err);
+    toast('Gagal memuat Administrasi dari Supabase: '+(err?.message||'Unknown error'));
+  }finally{adminSyncBusy=false;}
+}
+
+async function saveAdministration(id){
+  const title=document.getElementById('aTitle')?.value.trim();
+  if(!title){toast('Judul dokumen wajib diisi.');document.getElementById('aTitle')?.focus();return;}
+  try{
+    const user=await getProgramSession();
+    const existing=(state.administration||[]).find(x=>x.id===id||x.supabaseId===id);
+    const program=document.getElementById('aProgram')?.value.trim()||'';
+    const data={
+      id:id||'ADM-'+String(Date.now()).slice(-6),
+      title,
+      category:document.getElementById('aCategory')?.value||'Administrasi Program',
+      program,
+      programId:existing?.programId||'',
+      status:document.getElementById('aStatus')?.value||'DRAFT',
+      date:document.getElementById('aDate')?.value||dateId(),
+      dueDate:document.getElementById('aDue')?.value||'',
+      picId:existing?.picId||'',
+      pic:document.getElementById('aPic')?.value.trim()||state.user?.name||'Admin Satu Amal',
+      link:document.getElementById('aLink')?.value.trim()||'',
+      notes:document.getElementById('aNotes')?.value.trim()||'',
+      supabaseId:existing?.supabaseId||''
+    };
+
+    /* Re-resolve program by current name so manual/custom names remain supported. */
+    const p=state.programs.find(a=>a.name===program);
+    if(p){data.programId=p.supabaseId||p.id||'';}
+
+    const payload=localAdminPayload(data,user.id);
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('administration').update(payload).eq('id',existing.supabaseId)
+        .select('id,code,title,admin_type,program_id,custom_program_name,status,document_date,due_date,pic_id,pic_name,document_url,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('administration').upsert(payload,{onConflict:'code'})
+        .select('id,code,title,admin_type,program_id,custom_program_name,status,document_date,due_date,pic_id,pic_name,document_url,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+
+    const mapped=adminRemoteRowToState(remote);
+    const idx=state.administration.findIndex(x=>x.id===id||x.supabaseId===existing?.supabaseId);
+    if(idx>=0)state.administration[idx]=mapped;else state.administration.unshift(mapped);
+    save();adminRemoteReady=true;closeModal();showPage('administration');toast('Administrasi tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveAdministration error',err);
+    toast('Gagal menyimpan Administrasi: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteAdministration(id){
+  if(!confirm('Hapus data administrasi ini?'))return;
+  const x=(state.administration||[]).find(a=>a.id===id||a.supabaseId===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('administration').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.code){
+      const {error}=await supabaseClient.from('administration').delete().eq('code',x.code);
+      if(error)throw error;
+    }
+    state.administration=state.administration.filter(a=>a.id!==id&&a.supabaseId!==id);
+    save();adminRemoteReady=true;showPage('administration');toast('Administrasi dihapus dari Supabase ✅');
+  }catch(err){
+    console.error('deleteAdministration error',err);
+    toast('Gagal menghapus Administrasi: '+(err?.message||'Unknown error'));
+  }
+}
+
+/* Route wrapper: keep the existing Support UI, but sync Administrasi from Supabase. */
+const _showPageBeforeAdminRemote=showPage;
+showPage=function(page){
+  if(page==='administration'){
+    if(!state.checkedIn){toast('Silakan check-in terlebih dahulu.');page='attendance';}
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+    document.getElementById('topTitle').textContent='Administrasi';
+    document.getElementById('content').innerHTML=administrationPage();
+    document.getElementById('sidebar').classList.remove('open');
+    syncAdministrationsFromSupabase();
+    return;
+  }
+  _showPageBeforeAdminRemote(page);
+};
+
+/* Sync once shortly after authentication/boot; opening the module remains the primary trigger. */
+setTimeout(()=>{try{syncAdministrationsFromSupabase();}catch(e){}},900);
+</script>
+
 </body>
 </html>
