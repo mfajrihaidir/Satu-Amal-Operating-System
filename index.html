@@ -1390,6 +1390,48 @@ body{
 @media(max-width:900px){.support-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-flow{grid-template-columns:1fr}}
 @media(max-width:560px){.support-summary{grid-template-columns:1fr}}
 
+
+
+/* ===== MOBILE LOGIN/VIEWS ISOLATION FIX ===== */
+@media (max-width: 768px){
+  /* Keep Login and Verification as exclusive full-screen layers on mobile.
+     Desktop styles/layout remain unchanged. */
+  #loginScreen.login,
+  #verificationScreen.login{
+    position:fixed !important;
+    inset:0 !important;
+    width:100dvw !important;
+    height:100dvh !important;
+    min-height:100dvh !important;
+    max-height:none !important;
+    margin:0 !important;
+    padding:18px 14px !important;
+    z-index:1000 !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    box-sizing:border-box !important;
+  }
+
+  #loginScreen.login:not(.hidden),
+  #verificationScreen.login:not(.hidden){
+    display:grid !important;
+    place-items:center !important;
+  }
+
+  #loginScreen.login > .login-card-v4,
+  #verificationScreen.login > .verify-card-v4{
+    width:min(540px,100%) !important;
+    max-width:100% !important;
+    margin:auto !important;
+  }
+
+  /* Prevent dashboard/topbar from peeking through while Login/Verification is shown. */
+  #loginScreen.login:not(.hidden) ~ #app,
+  #verificationScreen.login:not(.hidden) ~ #app{
+    visibility:hidden !important;
+    pointer-events:none !important;
+  }
+}
 </style>
 </head>
 <body>
@@ -2086,7 +2128,18 @@ function escapeHtml(value){
 function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div><button class="btn btn-primary" onclick="openProfileModal()">Edit Profil</button></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)}
 function toggleSide(){document.getElementById('sidebar').classList.toggle('open')}
-if(state.user && state.checkedIn){renderApp();showPage('dashboard')}else{document.getElementById('app').classList.add('hidden');document.getElementById('verificationScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
+if(state.user && state.checkedIn){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('verificationScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderApp();
+  showPage('dashboard');
+}else{
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('verificationScreen').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+
 
 /* ================= STAGE 1 - INTEGRATED DATA LAYER ================= */
 const STAGE1_DB_KEY = 'sa_os_database_v1';
