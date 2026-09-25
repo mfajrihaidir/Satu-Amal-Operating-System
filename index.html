@@ -2163,16 +2163,186 @@ function partnershipPotential(){return state.partnerships.reduce((a,x)=>a+Number
 function badgeClass(status){return ['SELESAI','AKTIF','MASUK','TERBIT','BERJALAN','LUNAS'].includes(status)?'b-green':['PROSES','REVIEW','PROPOSAL','PERTEMUAN','FOLLOW-UP'].includes(status)?'b-blue':['AT RISK','PERLU DATA','TERJADWAL'].includes(status)?'b-yellow':status==='TERLAMBAT'||status==='DELAYED'?'b-red':'b-purple'}
 function moduleToolbar(placeholder,button){return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px"><input id="moduleSearch" oninput="filterModuleRows(this.value)" placeholder="${esc(placeholder)}" style="flex:1;min-width:220px;padding:10px 12px;border:1px solid #e1e8ee;border-radius:9px;outline:none"><button class="btn btn-secondary btn-small" onclick="document.getElementById('moduleSearch').value='';filterModuleRows('')">Reset</button>${button||''}</div>`}
 function filterModuleRows(q){const s=String(q||'').toLowerCase();document.querySelectorAll('#moduleTableBody tr[data-search]').forEach(tr=>tr.style.display=!s||tr.dataset.search.toLowerCase().includes(s)?'':'none')}
+let contentRemoteReady=false;
+let contentSyncBusy=false;
+
+function contentRemoteRowToState(r){
+  const programId=r.program_id||'';
+  const linkedProgram=state.programs.find(p=>p.supabaseId===programId||p.id===programId);
+  const programName=r.custom_program_name||linkedProgram?.name||'';
+  return {
+    id:r.code||('CNT-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    code:r.code||'',
+    title:r.title||'',
+    program:programName,
+    programId:programId,
+    type:r.content_type||'Reels',
+    channel:r.channel||'Instagram',
+    status:r.status||'REVIEW',
+    picId:r.pic_id||'',
+    pic:r.pic_name||'',
+    publishDate:r.publish_date||dateId(),
+    reach:Number(r.reach||0),
+    engagement:Number(r.engagement||0),
+    notes:r.notes||''
+  };
+}
+
+function localContentPayload(x,userId){
+  const p=state.programs.find(a=>a.id===x.programId||a.name===x.program||a.supabaseId===x.programId);
+  const linkedProgramId=p?.supabaseId || null;
+  const customProgramName=(!p && x.program)?x.program:null;
+  return {
+    code:x.code||x.id,
+    title:x.title,
+    program_id:linkedProgramId,
+    custom_program_name:customProgramName,
+    channel:x.channel||'Instagram',
+    content_type:x.type||'Reels',
+    status:x.status||'REVIEW',
+    publish_date:x.publishDate||dateId(),
+    reach:Math.max(0,Number(x.reach)||0),
+    engagement:Math.max(0,Number(x.engagement)||0),
+    pic_id:x.picId||userId,
+    pic_name:x.pic||'',
+    notes:x.notes||null
+  };
+}
+
+async function syncContentFromSupabase(){
+  if(contentSyncBusy||contentRemoteReady)return;
+  contentSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('contents')
+      .select('id,code,title,program_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,notes,created_at,updated_at')
+      .order('publish_date',{ascending:false,nullsLast:true})
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+
+    if(!remote||remote.length===0){
+      const locals=(state.contentItems||[]).filter(x=>x?.title);
+      if(locals.length){
+        const payload=locals.map(x=>localContentPayload(x,user.id));
+        const {error:insertError}=await supabaseClient.from('contents').upsert(payload,{onConflict:'code'});
+        if(insertError)throw insertError;
+        const {data:seeded,error:seedError}=await supabaseClient
+          .from('contents')
+          .select('id,code,title,program_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,notes,created_at,updated_at')
+          .order('publish_date',{ascending:false,nullsLast:true})
+          .order('created_at',{ascending:true});
+        if(seedError)throw seedError;
+        state.contentItems=(seeded||[]).map(contentRemoteRowToState);
+      }else{
+        state.contentItems=[];
+      }
+    }else{
+      state.contentItems=remote.map(contentRemoteRowToState);
+    }
+    localStorage.setItem('sa_contents_supabase_loaded','true');
+    save();
+    contentRemoteReady=true;
+    if(document.getElementById('topTitle')?.textContent==='Konten')showPage('content');
+    toast('Data Konten tersinkron ke Supabase ✅');
+  }catch(err){
+    console.error('Content sync error',err);
+    toast('Konten online gagal dimuat: '+(err?.message||'Unknown error'));
+  }finally{contentSyncBusy=false;}
+}
+
 function contentPage(){
-  const published=state.contentItems.filter(x=>x.status==='TERBIT').length, production=state.contentItems.filter(x=>x.status==='REVIEW'||x.status==='PROSES').length;
+  if(!contentRemoteReady)setTimeout(syncContentFromSupabase,0);
+  const published=state.contentItems.filter(x=>x.status==='TERBIT').length;
+  const production=state.contentItems.filter(x=>x.status==='REVIEW'||x.status==='PROSES').length;
   return `<div class="module-page"><div class="page-head"><div><h1>Konten</h1><p>Rencanakan, produksi, review, jadwalkan, dan ukur performa konten.</p></div><button class="btn btn-primary" onclick="openContent()">+ Tambah Konten</button></div>
   <div class="grid kpis">${kpiPlain('Total Konten',String(state.contentItems.length),'Database')}${kpiPlain('Produksi',String(production),'Perlu diproses')}${kpiPlain('Terbit',String(published),'Sudah tayang')}${kpiPlain('Jangkauan',formatCompactNumber(contentReachTotal()),'Total reach')}</div>
-  <div class="card" style="margin-top:16px;padding:16px">${moduleToolbar('Cari judul, kanal, program...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Konten</th><th>Tipe</th><th>Channel</th><th>Status</th><th>PIC</th><th>Tayang</th><th>Reach</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">
-  ${state.contentItems.map(x=>`<tr data-search="${esc([x.title,x.type,x.channel,x.status,x.pic,x.program].join(' '))}"><td><strong>${esc(x.title)}</strong><br><small>${esc(x.program)}</small></td><td>${esc(x.type)}</td><td>${esc(x.channel)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.pic)}</td><td>${esc(x.publishDate)}</td><td>${Number(x.reach||0).toLocaleString('id-ID')}</td><td><button class="btn btn-secondary btn-small" onclick="openContent('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteContent('${x.id}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`;
+  <div class="card" style="margin-top:16px;padding:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Tersimpan di Supabase</div>${moduleToolbar('Cari judul, kanal, program...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Konten</th><th>Tipe</th><th>Channel</th><th>Status</th><th>PIC</th><th>Tayang</th><th>Reach</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">
+  ${state.contentItems.map(x=>`<tr data-search="${esc([x.title,x.type,x.channel,x.status,x.pic,x.program].join(' '))}"><td><strong>${esc(x.title)}</strong><br><small>${esc(x.program||'-')}</small></td><td>${esc(x.type)}</td><td>${esc(x.channel)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.pic||'-')}</td><td>${esc(x.publishDate)}</td><td>${Number(x.reach||0).toLocaleString('id-ID')}</td><td><button class="btn btn-secondary btn-small" onclick="openContent('${esc(x.id)}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteContent('${esc(x.id)}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`;
 }
-function openContent(id){const x=state.contentItems.find(a=>a.id===id)||{id:'CNT-'+String(Date.now()).slice(-6),title:'',type:'Reels',channel:'Instagram',status:'REVIEW',pic:state.user.name,publishDate:dateId(),reach:0,program:state.programs[0]?.name||''};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Konten</h2><div class="form-grid"><div class="field"><label>Judul</label><input id="cTitle" value="${esc(x.title)}"></div><div class="field"><label>Nama Program</label><input id="cProgram" list="contentProgramNames" value="${esc(x.program)}" placeholder="Pilih dari daftar atau ketik manual"><datalist id="contentProgramNames">${state.programs.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist></div><div class="field"><label>Tipe</label><select id="cType">${['Reels','Carousel','Poster','Video','Artikel','Story'].map(v=>`<option ${v===x.type?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Channel</label><select id="cChannel">${['Instagram','TikTok','Facebook','YouTube','WhatsApp','Website'].map(v=>`<option ${v===x.channel?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="cStatus">${['REVIEW','PROSES','TERJADWAL','TERBIT'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>PIC</label><input id="cPic" value="${esc(x.pic)}"></div><div class="field"><label>Tanggal Tayang</label><input id="cDate" type="date" value="${esc(x.publishDate)}"></div><div class="field"><label>Reach</label><input id="cReach" type="number" min="0" value="${Number(x.reach)||0}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveContent('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
-function saveContent(id){const title=document.getElementById('cTitle').value.trim();if(!title){toast('Judul konten wajib diisi.');return}const data={id:id||'CNT-'+String(Date.now()).slice(-6),title,program:document.getElementById('cProgram').value,type:document.getElementById('cType').value,channel:document.getElementById('cChannel').value,status:document.getElementById('cStatus').value,pic:document.getElementById('cPic').value.trim()||state.user.name,publishDate:document.getElementById('cDate').value||dateId(),reach:moneyNumber(document.getElementById('cReach').value)};const i=state.contentItems.findIndex(a=>a.id===data.id);if(i>=0)state.contentItems[i]=data;else state.contentItems.push(data);save();closeModal();showPage('content');toast('Konten tersimpan ✅')}
-function deleteContent(id){if(!confirm('Hapus konten ini?'))return;state.contentItems=state.contentItems.filter(x=>x.id!==id);save();showPage('content');toast('Konten dihapus.')}
+
+function openContent(id){
+  const x=state.contentItems.find(a=>a.id===id)||{id:'CNT-'+String(Date.now()).slice(-6),name:'',title:'',type:'Reels',channel:'Instagram',status:'REVIEW',pic:state.user?.name||'Admin Satu Amal',publishDate:dateId(),reach:0,engagement:0,program:'',programId:'',notes:''};
+  const programOptions=state.programs.map(p=>`<option value="${esc(p.name)}">`).join('');
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Konten</h2>
+  <div class="form-grid">
+    <div class="field"><label>Judul</label><input id="cTitle" value="${esc(x.title)}"></div>
+    <div class="field"><label>Nama Program</label><input id="cProgram" list="contentProgramNames" value="${esc(x.program||'')}" placeholder="Pilih dari daftar atau ketik manual"><datalist id="contentProgramNames">${programOptions}</datalist></div>
+    <div class="field"><label>Tipe</label><select id="cType">${['Reels','Carousel','Poster','Video','Artikel','Story'].map(v=>`<option ${v===x.type?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label>Channel</label><select id="cChannel">${['Instagram','TikTok','Facebook','YouTube','WhatsApp','Website'].map(v=>`<option ${v===x.channel?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label>Status</label><select id="cStatus">${['REVIEW','PROSES','TERJADWAL','TERBIT'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label>PIC</label><input id="cPic" value="${esc(x.pic||state.user?.name||'')}"></div>
+    <div class="field"><label>Tanggal Tayang</label><input id="cDate" type="date" value="${esc(x.publishDate)}"></div>
+    <div class="field"><label>Reach</label><input id="cReach" type="number" min="0" value="${Number(x.reach)||0}"></div>
+    <div class="field"><label>Engagement</label><input id="cEngagement" type="number" min="0" value="${Number(x.engagement)||0}"></div>
+    <div class="field full"><label>Catatan</label><textarea id="cNotes" rows="3" placeholder="Catatan konten">${esc(x.notes||'')}</textarea></div>
+  </div>
+  <div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveContent('${esc(id||'')}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function saveContent(id){
+  const title=document.getElementById('cTitle').value.trim();
+  if(!title){toast('Judul konten wajib diisi.');document.getElementById('cTitle').focus();return}
+  try{
+    const user=await getProgramSession();
+    const existing=state.contentItems.find(x=>x.id===id);
+    const programName=document.getElementById('cProgram').value.trim();
+    const program=state.programs.find(p=>p.name===programName);
+    const data={
+      id:id||'CNT-'+String(Date.now()).slice(-6),
+      title,
+      program:programName,
+      programId:program?.supabaseId||'',
+      type:document.getElementById('cType').value,
+      channel:document.getElementById('cChannel').value,
+      status:document.getElementById('cStatus').value,
+      pic:document.getElementById('cPic').value.trim()||state.user?.name||'Admin Satu Amal',
+      publishDate:document.getElementById('cDate').value||dateId(),
+      reach:moneyNumber(document.getElementById('cReach').value),
+      engagement:moneyNumber(document.getElementById('cEngagement').value),
+      notes:document.getElementById('cNotes').value.trim(),
+      supabaseId:existing?.supabaseId||''
+    };
+    const payload=localContentPayload(data,user.id);
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('contents').update(payload).eq('id',existing.supabaseId).select('id,code,title,program_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('contents').upsert(payload,{onConflict:'code'}).select('id,code,title,program_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+    const mapped=contentRemoteRowToState(remote);
+    const idx=state.contentItems.findIndex(x=>x.id===id);
+    if(idx>=0)state.contentItems[idx]=mapped;else state.contentItems.unshift(mapped);
+    save();contentRemoteReady=true;closeModal();showPage('content');toast('Konten tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveContent error',err);
+    toast('Gagal menyimpan Konten: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteContent(id){
+  if(!confirm('Hapus konten ini?'))return;
+  const x=state.contentItems.find(a=>a.id===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('contents').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.code){
+      const {error}=await supabaseClient.from('contents').delete().eq('code',x.code);
+      if(error)throw error;
+    }
+    state.contentItems=state.contentItems.filter(a=>a.id!==id);
+    save();showPage('content');toast('Konten dihapus dari Supabase ✅');
+  }catch(err){
+    console.error('deleteContent error',err);
+    toast('Gagal menghapus Konten: '+(err?.message||'Unknown error'));
+  }
+}
 
 let fundraisingRemoteReady=false;
 let fundraisingSyncBusy=false;
