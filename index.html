@@ -2328,10 +2328,161 @@ async function deleteFundraising(id){
   }
 }
 
-function crmPage(){const total=state.crm.reduce((a,x)=>a+Number(x.totalDonation||0),0);return `<div class="module-page"><div class="page-head"><div><h1>CRM / Donor</h1><p>Kelola database donor, riwayat kontribusi, segmentasi dan follow-up.</p></div><button class="btn btn-primary" onclick="openCRM()">+ Tambah Donor</button></div><div class="grid kpis">${kpiPlain('Total Data',String(state.crm.length),'Donor / entitas')}${kpiPlain('Donatur Baru',String(state.crm.filter(x=>x.segment==='Donatur Baru').length),'Segmentasi')}${kpiPlain('Donatur Berulang',String(state.crm.filter(x=>x.segment==='Donatur Berulang').length),'Segmentasi')}${kpiPlain('Donatur Istiqomah',String(state.crm.filter(x=>x.segment==='Donatur Istiqomah').length),'Segmentasi')}${kpiPlain('Follow-up',String(crmPending()),'Perlu tindakan')}${kpiPlain('Total Donasi',rupiah(total),'Database')}</div><div class="card" style="margin-top:16px;padding:16px">${moduleToolbar('Cari nama, segmen, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Nama</th><th>Kontak</th><th>Segmen</th><th>Akad Program</th><th>Total Donasi</th><th>Status</th><th>Last Donation</th><th>Follow-up</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.crm.map(x=>`<tr data-search="${esc([x.name,x.phone,x.segment,x.status,x.pic].join(' '))}"><td><strong>${esc(x.name)}</strong><br><small>${esc(x.id)} · ${esc(x.pic)}</small></td><td>${esc(x.phone||'-')}</td><td>${esc(x.segment)}</td><td>${esc(x.akadProgram||'-')}</td><td>${rupiah(x.totalDonation)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.lastDonation||'-')}</td><td>${esc(x.followUp||'-')}</td><td><button class="btn btn-secondary btn-small" onclick="openCRM('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteCRM('${x.id}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`}
-function openCRM(id){const x=state.crm.find(a=>a.id===id)||{id:'CRM-'+String(Date.now()).slice(-6),name:'',phone:'',segment:'Donatur Baru',akadProgram:'Sedekah',totalDonation:0,lastDonation:'',status:'AKTIF',pic:state.user.name,followUp:dateId()};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Donor</h2><div class="form-grid"><div class="field"><label>Nama / Entitas</label><input id="rName" value="${esc(x.name)}"></div><div class="field"><label>No. HP / Kontak</label><input id="rPhone" value="${esc(x.phone)}"></div><div class="field"><label>Segmen Donatur</label><select id="rSegment">${['Donatur Baru','Donatur Berulang','Donatur Istiqomah'].map(v=>`<option ${v===x.segment?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Akad Program</label><select id="rAkad">${['Sedekah','Infak','Wakaf','Zakat'].map(v=>`<option ${v===x.akadProgram?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="rStatus">${['AKTIF','FOLLOW-UP','PERLU DATA','NONAKTIF'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Total Donasi (Rp)</label><input id="rTotal" type="number" min="0" value="${Number(x.totalDonation)||0}"></div><div class="field"><label>Donasi Terakhir</label><input id="rLast" type="date" value="${esc(x.lastDonation)}"></div><div class="field"><label>Follow-up Berikutnya</label><input id="rFollow" type="date" value="${esc(x.followUp)}"></div><div class="field"><label>PIC</label><input id="rPic" value="${esc(x.pic)}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveCRM('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
-function saveCRM(id){const name=document.getElementById('rName').value.trim();if(!name){toast('Nama donor wajib diisi.');return}const data={id:id||'CRM-'+String(Date.now()).slice(-6),name,phone:document.getElementById('rPhone').value.trim(),segment:document.getElementById('rSegment').value,akadProgram:document.getElementById('rAkad').value,totalDonation:moneyNumber(document.getElementById('rTotal').value),lastDonation:document.getElementById('rLast').value, status:document.getElementById('rStatus').value,pic:document.getElementById('rPic').value.trim()||state.user.name,followUp:document.getElementById('rFollow').value};const i=state.crm.findIndex(a=>a.id===data.id);if(i>=0)state.crm[i]=data;else state.crm.push(data);save();closeModal();showPage('crm');toast('Data CRM tersimpan ✅')}
-function deleteCRM(id){if(!confirm('Hapus data donor ini?'))return;state.crm=state.crm.filter(x=>x.id!==id);save();showPage('crm');toast('Data CRM dihapus.')}
+let crmRemoteReady=false;
+let crmSyncBusy=false;
+
+function crmRemoteRowToState(r){
+  return {
+    id:r.donor_code || ('CRM-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    code:r.donor_code||'',
+    name:r.name||'',
+    phone:r.phone||'',
+    email:r.email||'',
+    segment:r.segment||'Donatur Baru',
+    akadProgram:r.akad_program||'Sedekah',
+    city:r.city||'',
+    notes:r.notes||'',
+    totalDonation:Number(r.total_donation||0),
+    lastDonation:r.last_donation||'',
+    status:r.status||'AKTIF',
+    picId:r.pic_id||'',
+    pic:r.pic_name||(r.pic_id===state.user?.id?state.user?.name:'')||'PIC',
+    followUp:r.follow_up_date||''
+  };
+}
+
+function localCRMpayload(x,userId){
+  return {
+    donor_code:x.code||x.id,
+    name:x.name,
+    phone:x.phone||null,
+    email:x.email||null,
+    segment:x.segment||'Donatur Baru',
+    akad_program:x.akadProgram||'Sedekah',
+    city:x.city||null,
+    notes:x.notes||null,
+    status:x.status||'AKTIF',
+    total_donation:Math.max(0,Number(x.totalDonation)||0),
+    last_donation:x.lastDonation||null,
+    follow_up_date:x.followUp||null,
+    pic_id:x.picId||userId,
+    pic_name:x.pic||''
+  };
+}
+
+async function syncCRMFromSupabase(){
+  if(crmSyncBusy||crmRemoteReady)return;
+  crmSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('donors')
+      .select('id,donor_code,name,phone,email,segment,akad_program,city,notes,status,total_donation,last_donation,follow_up_date,pic_id,pic_name,created_at,updated_at')
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+
+    if(!remote||remote.length===0){
+      const locals=(state.crm||[]).filter(x=>x?.name);
+      if(locals.length){
+        const payload=locals.map(x=>localCRMpayload(x,user.id));
+        const {error:insertError}=await supabaseClient.from('donors').upsert(payload,{onConflict:'donor_code'});
+        if(insertError)throw insertError;
+        const {data:seeded,error:seedError}=await supabaseClient
+          .from('donors')
+          .select('id,donor_code,name,phone,email,segment,akad_program,city,notes,status,total_donation,last_donation,follow_up_date,pic_id,pic_name,created_at,updated_at')
+          .order('created_at',{ascending:true});
+        if(seedError)throw seedError;
+        state.crm=(seeded||[]).map(crmRemoteRowToState);
+      }else{
+        state.crm=[];
+      }
+    }else{
+      state.crm=remote.map(crmRemoteRowToState);
+    }
+    localStorage.setItem('sa_crm_supabase_loaded','true');
+    save();
+    crmRemoteReady=true;
+    if(document.getElementById('topTitle')?.textContent==='CRM / Donor')showPage('crm');
+    toast('Data CRM / Donor tersinkron ke Supabase ✅');
+  }catch(err){
+    console.error('CRM sync error',err);
+    toast('CRM online gagal dimuat: '+(err?.message||'Unknown error'));
+  }finally{crmSyncBusy=false;}
+}
+
+function crmPage(){
+  if(!crmRemoteReady)setTimeout(syncCRMFromSupabase,0);
+  const total=state.crm.reduce((a,x)=>a+Number(x.totalDonation||0),0);
+  return `<div class="module-page"><div class="page-head"><div><h1>CRM / Donor</h1><p>Kelola database donor, segmentasi, kontribusi dan follow-up.</p></div><button class="btn btn-primary" onclick="openCRM()">+ Tambah Donor</button></div><div class="grid kpis">${kpiPlain('Total Data',String(state.crm.length),'Donor / entitas')}${kpiPlain('Donatur Baru',String(state.crm.filter(x=>x.segment==='Donatur Baru').length),'Segmentasi')}${kpiPlain('Donatur Berulang',String(state.crm.filter(x=>x.segment==='Donatur Berulang').length),'Segmentasi')}${kpiPlain('Donatur Istiqomah',String(state.crm.filter(x=>x.segment==='Donatur Istiqomah').length),'Segmentasi')}${kpiPlain('Follow-up',String(crmPending()),'Perlu tindakan')}${kpiPlain('Total Donasi',rupiah(total),'Database')}</div><div class="card" style="margin-top:16px;padding:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:10px">Data tersimpan di Supabase</div>${moduleToolbar('Cari nama, segmen, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Nama</th><th>Kontak</th><th>Segmen</th><th>Akad Program</th><th>Total Donasi</th><th>Status</th><th>Last Donation</th><th>Follow-up</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.crm.map(x=>`<tr data-search="${esc([x.name,x.phone,x.segment,x.status,x.pic].join(' '))}"><td><strong>${esc(x.name)}</strong><br><small>${esc(x.id)} · ${esc(x.pic)}</small></td><td>${esc(x.phone||'-')}</td><td>${esc(x.segment)}</td><td>${esc(x.akadProgram||'-')}</td><td>${rupiah(x.totalDonation)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td>${esc(x.lastDonation||'-')}</td><td>${esc(x.followUp||'-')}</td><td><button class="btn btn-secondary btn-small" onclick="openCRM('${esc(x.id)}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteCRM('${esc(x.id)}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`;
+}
+
+function openCRM(id){
+  const x=state.crm.find(a=>a.id===id)||{id:'CRM-'+String(Date.now()).slice(-6),name:'',phone:'',email:'',segment:'Donatur Baru',akadProgram:'Sedekah',totalDonation:0,lastDonation:'',status:'AKTIF',pic:state.user?.name||'Admin Satu Amal',followUp:dateId(),city:'',notes:''};
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Donor</h2><div class="form-grid"><div class="field"><label>Nama / Entitas</label><input id="rName" value="${esc(x.name)}"></div><div class="field"><label>No. HP / Kontak</label><input id="rPhone" value="${esc(x.phone)}"></div><div class="field"><label>Email</label><input id="rEmail" type="email" value="${esc(x.email||'')}"></div><div class="field"><label>Kota</label><input id="rCity" value="${esc(x.city||'')}"></div><div class="field"><label>Segmen Donatur</label><select id="rSegment">${['Donatur Baru','Donatur Berulang','Donatur Istiqomah'].map(v=>`<option ${v===x.segment?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Akad Program</label><select id="rAkad">${['Sedekah','Infak','Wakaf','Zakat'].map(v=>`<option ${v===x.akadProgram?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="rStatus">${['AKTIF','FOLLOW-UP','PERLU DATA','NONAKTIF'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Total Donasi (Rp)</label><input id="rTotal" type="number" min="0" value="${Number(x.totalDonation)||0}"></div><div class="field"><label>Donasi Terakhir</label><input id="rLast" type="date" value="${esc(x.lastDonation)}"></div><div class="field"><label>Follow-up Berikutnya</label><input id="rFollow" type="date" value="${esc(x.followUp)}"></div><div class="field"><label>PIC</label><input id="rPic" value="${esc(x.pic||state.user?.name||'')}"></div><div class="field full"><label>Catatan</label><textarea id="rNotes" rows="3" placeholder="Catatan donor">${esc(x.notes||'')}</textarea></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveCRM('${esc(id||'')}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function saveCRM(id){
+  const name=document.getElementById('rName').value.trim();
+  if(!name){toast('Nama donor wajib diisi.');return}
+  try{
+    const user=await getProgramSession();
+    const existing=state.crm.find(x=>x.id===id);
+    const code=existing?.code || existing?.id || id || 'CRM-'+String(Date.now()).slice(-6);
+    const payload={
+      donor_code:code,
+      name,
+      phone:document.getElementById('rPhone').value.trim()||null,
+      email:document.getElementById('rEmail').value.trim()||null,
+      city:document.getElementById('rCity').value.trim()||null,
+      segment:document.getElementById('rSegment').value,
+      akad_program:document.getElementById('rAkad').value,
+      status:document.getElementById('rStatus').value,
+      total_donation:moneyNumber(document.getElementById('rTotal').value),
+      last_donation:document.getElementById('rLast').value||null,
+      follow_up_date:document.getElementById('rFollow').value||null,
+      pic_id:existing?.picId||user.id,
+      pic_name:document.getElementById('rPic').value.trim()||state.user?.name||'Admin Satu Amal',
+      notes:document.getElementById('rNotes').value.trim()||null
+    };
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('donors').update(payload).eq('id',existing.supabaseId).select('id,donor_code,name,phone,email,segment,akad_program,city,notes,status,total_donation,last_donation,follow_up_date,pic_id,pic_name,created_at,updated_at').single();
+      remote=result.data; error=result.error;
+    }else{
+      const result=await supabaseClient.from('donors').upsert(payload,{onConflict:'donor_code'}).select('id,donor_code,name,phone,email,segment,akad_program,city,notes,status,total_donation,last_donation,follow_up_date,pic_id,pic_name,created_at,updated_at').single();
+      remote=result.data; error=result.error;
+    }
+    if(error)throw error;
+    const mapped=crmRemoteRowToState(remote);
+    const idx=state.crm.findIndex(x=>x.id===id);
+    if(idx>=0)state.crm[idx]=mapped;else state.crm.push(mapped);
+    save(); crmRemoteReady=true; closeModal(); showPage('crm'); toast('Data Donor tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveCRM error',err);
+    toast('Gagal menyimpan Donor: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteCRM(id){
+  const x=state.crm.find(a=>a.id===id);if(!x)return;
+  if(!confirm(`Hapus data donor "${x.name}"?`))return;
+  try{
+    if(x.supabaseId){
+      const {error}=await supabaseClient.from('donors').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x.code){
+      const {error}=await supabaseClient.from('donors').delete().eq('donor_code',x.code);
+      if(error)throw error;
+    }
+    state.crm=state.crm.filter(a=>a.id!==id);
+    save(); showPage('crm'); toast('Data Donor dihapus dari Supabase.');
+  }catch(err){
+    console.error('deleteCRM error',err);
+    toast('Gagal menghapus Donor: '+(err?.message||'Unknown error'));
+  }
+}
 
 function partnershipPage(){const active=state.partnerships.filter(x=>x.status==='AKTIF').length, pipeline=partnershipPotential();return `<div class="module-page"><div class="page-head"><div><h1>Kemitraan</h1><p>Kelola prospek, proposal, pertemuan, nilai pipeline dan kerja sama aktif.</p></div><button class="btn btn-primary" onclick="openPartnership()">+ Tambah Mitra</button></div><div class="grid kpis">${kpiPlain('Prospek',String(state.partnerships.filter(x=>x.status==='PROSES').length),'Pipeline')}${kpiPlain('Aktif',String(active),'Kerja sama berjalan')}${kpiPlain('Proposal',String(state.partnerships.filter(x=>x.stage==='PROPOSAL').length),'Menunggu')}${kpiPlain('Potensi Nilai',rupiah(pipeline),'Pipeline')}</div><div class="card" style="margin-top:16px;padding:16px">${moduleToolbar('Cari asal instansi, tipe, PIC...', '')}<div style="overflow-x:auto"><table class="table"><thead><tr><th>Asal Instansi</th><th>Tipe</th><th>Tahap</th><th>PIC</th><th>Potensi</th><th>Aksi Berikutnya</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="moduleTableBody">${state.partnerships.map(x=>`<tr data-search="${esc([x.organization,x.type,x.stage,x.pic,x.nextAction,x.status].join(' '))}"><td><strong>${esc(x.organization)}</strong><br><small>${esc(x.id)}</small></td><td>${esc(x.type)}</td><td>${esc(x.stage)}</td><td>${esc(x.pic)}</td><td>${rupiah(x.potential)}</td><td>${esc(x.nextAction)}</td><td><span class="badge ${badgeClass(x.status)}">${esc(x.status)}</span></td><td><button class="btn btn-secondary btn-small" onclick="openPartnership('${x.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deletePartnership('${x.id}')">Hapus</button></td></tr>`).join('')}</tbody></table></div></div></div>`}
 function openPartnership(id){const x=state.partnerships.find(a=>a.id===id)||{id:'MIT-'+String(Date.now()).slice(-6),organization:'',type:'Perusahaan',stage:'PROSPEK',pic:state.user.name,potential:0,nextAction:'Hubungi calon mitra',status:'PROSES'};document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Mitra</h2><div class="form-grid"><div class="field"><label>Asal Instansi</label><input id="mOrg" value="${esc(x.organization)}"></div><div class="field"><label>Tipe</label><select id="mType">${['Perusahaan','UMKM','Sekolah','Instansi Pemerintah','Komunitas','Lainnya'].map(v=>`<option ${v===x.type?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Tahap</label><select id="mStage">${['PROSPEK','PERTEMUAN','PROPOSAL','NEGOSIASI','AKTIF'].map(v=>`<option ${v===x.stage?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="mStatus">${['PROSES','AKTIF','SELESAI','TIDAK LANJUT'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>PIC</label><input id="mPic" value="${esc(x.pic)}"></div><div class="field"><label>Potensi Nilai (Rp)</label><input id="mPotential" type="number" min="0" value="${Number(x.potential)||0}"></div><div class="field full"><label>Aksi Berikutnya</label><input id="mNext" value="${esc(x.nextAction)}"></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="savePartnership('${id||''}')">Simpan</button></div>`;document.getElementById('modal').classList.remove('hidden')}
