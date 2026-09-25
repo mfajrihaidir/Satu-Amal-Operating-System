@@ -1702,18 +1702,18 @@ async function login(){
 
     const {data:profile,error:profileError}=await supabaseClient
       .from('profiles')
-      .select('id,full_name,division,role,is_active,photo_url')
+      .select('id,full_name,division,role,is_active,avatar_url')
       .eq('id',data.user.id)
       .single();
 
-    if(profileError) throw new Error('Profil akun belum ditemukan di tabel profiles. Pastikan profil menggunakan UUID Auth yang sama.');
+    if(profileError) throw new Error('Gagal membaca profil: '+(profileError.message||profileError.code||'Unknown error'));
     if(profile && profile.is_active===false) throw new Error('Akun ini sedang dinonaktifkan.');
 
     const name=profile?.full_name || data.user.email || 'Pengguna';
     const division=profile?.division || 'Manajemen';
     const role=profile?.role || 'Staff';
 
-    state.user={id:data.user.id,email:data.user.email,name,division,role,photoUrl:profile?.photo_url||''};
+    state.user={id:data.user.id,email:data.user.email,name,division,role,photoUrl:profile?.avatar_url||''};
     state.checkedIn=false;
     photoVerified=false;
     save();
