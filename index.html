@@ -1432,12 +1432,6 @@ body{
     pointer-events:none !important;
   }
 }
-
-/* ===== STAGE 2 AUTH ===== */
-.auth-login-note{font-size:10px;color:#a6bacb;margin:-8px 0 12px;text-align:left;line-height:1.5}
-#loginPassword::-ms-reveal{filter:grayscale(1)}
-.auth-loading{opacity:.7;pointer-events:none}
-
 </style>
 </head>
 <body>
@@ -1454,7 +1448,7 @@ body{
     <div class="login-form-v4">
       <div class="field">
         <label>EMAIL</label>
-        <input id="loginEmail" type="email" placeholder="Masukkan email akun" autocomplete="email" inputmode="email">
+        <input id="loginEmail" type="email" placeholder="Masukkan email akun" autocomplete="username">
       </div>
 
       <div class="field">
@@ -1462,9 +1456,8 @@ body{
         <input id="loginPassword" type="password" placeholder="Masukkan password" autocomplete="current-password">
       </div>
 
-      <div class="auth-login-note">Gunakan akun yang terdaftar di Satu Amal Operating System.</div>
-
-      <button class="btn btn-primary login-btn-v4" id="loginBtn" onclick="login()">MASUK KE SISTEM</button>
+      <button class="btn btn-primary login-btn-v4" id="loginButton" type="button" onclick="login()">MASUK KE SISTEM</button>
+      <div id="loginError" style="display:none;margin-top:12px;padding:11px 13px;border-radius:10px;background:#fff3f3;color:#b42318;font-size:12px;line-height:1.5"></div>
     </div>
 
     <div class="login-footer-v4">
@@ -1579,13 +1572,6 @@ body{
 <div id="toast" class="toast hidden"></div>
 
 
-<!-- SUPABASE CLIENT -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-  const SUPABASE_URL = 'https://xexjotcqlipipgvtrkbn.supabase.co';
-  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_sEbFuRz0p_tXDS4Gd1ZBrQ_LdaG2ImM';
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
-</script>
 <script>
 const state = {
   user: JSON.parse(localStorage.getItem('sa_user') || 'null'),
@@ -1678,47 +1664,55 @@ let cameraStream = null;
 let photoVerified = false;
 
 async function login(){
-  const email=(document.getElementById('loginEmail')?.value||'').trim().toLowerCase();
-  const password=document.getElementById('loginPassword')?.value||'';
-  const btn=document.getElementById('loginBtn');
+  const emailEl=document.getElementById('loginEmail');
+  const passwordEl=document.getElementById('loginPassword');
+  const button=document.getElementById('loginButton');
+  const errorBox=document.getElementById('loginError');
+  const email=(emailEl?.value||'').trim();
+  const password=passwordEl?.value||'';
 
-  if(!email){toast('Email wajib diisi.');document.getElementById('loginEmail')?.focus();return}
-  if(!/^\S+@\S+\.\S+$/.test(email)){toast('Format email belum benar.');document.getElementById('loginEmail')?.focus();return}
-  if(!password){toast('Password wajib diisi.');document.getElementById('loginPassword')?.focus();return}
-  if(typeof supabaseClient==='undefined'){toast('Koneksi Supabase belum siap. Refresh halaman lalu coba lagi.');return}
+  errorBox.style.display='none';
+  errorBox.textContent='';
+
+  if(!email){toast('Email wajib diisi.');emailEl.focus();return}
+  if(!password){toast('Password wajib diisi.');passwordEl.focus();return}
+  if(!window.supabase || !supabaseClient){
+    errorBox.textContent='Koneksi Supabase belum siap. Refresh halaman lalu coba lagi.';
+    errorBox.style.display='block';
+    return;
+  }
+
+  button.disabled=true;
+  button.textContent='MEMERIKSA...';
 
   try{
-    btn?.classList.add('auth-loading');
-    if(btn) btn.textContent='MEMVERIFIKASI...';
-
-    const {data:authData,error:authError}=await supabaseClient.auth.signInWithPassword({email,password});
-    if(authError) throw authError;
-    const authUser=authData?.user;
-    if(!authUser) throw new Error('Akun tidak ditemukan.');
+    const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});
+    if(error) throw error;
+    if(!data?.user) throw new Error('Akun berhasil diproses tetapi user tidak ditemukan.');
 
     const {data:profile,error:profileError}=await supabaseClient
       .from('profiles')
-      .select('id, full_name, division, role, avatar_url, is_active')
-      .eq('id',authUser.id)
+      .select('id,full_name,division,role,is_active,photo_url')
+      .eq('id',data.user.id)
       .single();
-    if(profileError) throw new Error('Profil pengguna belum tersedia.');
-    if(!profile.is_active) throw new Error('Akun ini sedang dinonaktifkan.');
 
-    state.user={id:profile.id,email:authUser.email||email,name:profile.full_name,division:profile.division,role:profile.role,photo:profile.avatar_url||''};
+    if(profileError) throw new Error('Profil akun belum ditemukan di tabel profiles. Pastikan profil menggunakan UUID Auth yang sama.');
+    if(profile && profile.is_active===false) throw new Error('Akun ini sedang dinonaktifkan.');
+
+    const name=profile?.full_name || data.user.email || 'Pengguna';
+    const division=profile?.division || 'Manajemen';
+    const role=profile?.role || 'Staff';
+
+    state.user={id:data.user.id,email:data.user.email,name,division,role,photoUrl:profile?.photo_url||''};
     state.checkedIn=false;
     photoVerified=false;
-    localStorage.removeItem('sa_checkin_time');
-    localStorage.removeItem('sa_attendance_photo');
-    localStorage.removeItem('sa_attendance_date');
     save();
 
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('verificationScreen').classList.remove('hidden');
-    document.getElementById('verifyName').textContent=state.user.name;
-    document.getElementById('verifyDivision').textContent=state.user.division+' • '+state.user.role;
-    const verifyAvatar=document.getElementById('verifyAvatar');
-    if(state.user.photo){verifyAvatar.innerHTML=`<img src="${state.user.photo}" alt="Foto profil" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;}
-    else{verifyAvatar.textContent=(state.user.name||'U').charAt(0).toUpperCase();}
+    document.getElementById('verifyName').textContent=name;
+    document.getElementById('verifyDivision').textContent=division+' • '+role;
+    document.getElementById('verifyAvatar').textContent=name.charAt(0).toUpperCase();
     document.getElementById('cameraStatus').textContent='Verifikasi hanya melalui kamera perangkat';
     document.getElementById('attendanceConfirm').classList.add('hidden');
     document.getElementById('confirmAttendance').checked=false;
@@ -1727,22 +1721,25 @@ async function login(){
     document.getElementById('cameraPlaceholder').classList.remove('hidden');
     document.getElementById('capturedPhoto').classList.add('hidden');
     document.getElementById('cameraVideo').classList.remove('hidden');
+
+    // Kamera tetap mengikuti alur verifikasi yang sudah ada.
+    setTimeout(()=>startCamera(),120);
   }catch(err){
-    toast(err?.message||'Login gagal. Periksa email dan password.');
-    try{await supabaseClient.auth.signOut();}catch(_){ }
+    console.error('LOGIN ERROR:',err);
+    let msg=err?.message||'Login gagal.';
+    if(/invalid login credentials/i.test(msg)) msg='Email atau password Supabase salah.';
+    else if(/email not confirmed/i.test(msg)) msg='Email akun belum dikonfirmasi di Supabase Auth.';
+    errorBox.textContent=msg;
+    errorBox.style.display='block';
+    toast('Login gagal. Cek pesan di bawah tombol.');
   }finally{
-    btn?.classList.remove('auth-loading');
-    if(btn) btn.textContent='MASUK KE SISTEM';
+    button.disabled=false;
+    button.textContent='MASUK KE SISTEM';
   }
 }
 
-async function backToLogin(){
+function backToLogin(){
   stopCamera();
-  try{if(typeof supabaseClient!=='undefined'){await supabaseClient.auth.signOut();}}catch(_){ }
-  localStorage.removeItem('sa_user');
-  localStorage.removeItem('sa_checked');
-  state.user=null;
-  state.checkedIn=false;
   document.getElementById('verificationScreen').classList.add('hidden');
   document.getElementById('loginScreen').classList.remove('hidden');
 }
@@ -1789,45 +1786,24 @@ function capturePhoto(){
   document.getElementById('confirmBtn').disabled=!document.getElementById('confirmAttendance').checked;
 }
 
-async function confirmAttendance(){
+function confirmAttendance(){
   if(!photoVerified || !document.getElementById('confirmAttendance').checked){
     toast('Ambil foto dan konfirmasi kehadiran terlebih dahulu.');
     return;
   }
-  if(!state.user?.id || typeof supabaseClient==='undefined'){toast('Sesi pengguna belum siap. Silakan login kembali.');return}
-  const confirmBtn=document.getElementById('confirmBtn');
-  try{
-    confirmBtn.disabled=true;
-    confirmBtn.textContent='MENYIMPAN KEHADIRAN...';
-    const today=new Date().toISOString().slice(0,10);
-    const checkInAt=new Date().toISOString();
-    const {error}=await supabaseClient.from('attendance').upsert({
-      user_id:state.user.id,
-      attendance_date:today,
-      check_in:checkInAt,
-      verification_status:'Verified',
-      verification_photo_url:'camera-verified'
-    },{onConflict:'user_id,attendance_date'});
-    if(error) throw error;
-    state.checkedIn=true;
-    localStorage.setItem('sa_checkin_time',new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}));
-    localStorage.setItem('sa_attendance_photo','verified');
-    localStorage.setItem('sa_attendance_date',today);
-    save();
-    stopCamera();
-    document.getElementById('verificationScreen').classList.add('hidden');
-    renderApp();
-    showPage('dashboard');
-    toast('Kehadiran tersimpan dan terverifikasi. ✅');
-  }catch(err){
-    toast(err?.message||'Kehadiran gagal disimpan.');
-  }finally{
-    confirmBtn.textContent='KONFIRMASI & MASUK DASHBOARD';
-    confirmBtn.disabled=!(photoVerified && document.getElementById('confirmAttendance').checked);
-  }
+  state.checkedIn=true;
+  localStorage.setItem('sa_checkin_time',new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}));
+  localStorage.setItem('sa_attendance_photo','verified');
+  localStorage.setItem('sa_attendance_date',new Date().toISOString().slice(0,10));
+  save();
+  stopCamera();
+  document.getElementById('verificationScreen').classList.add('hidden');
+  renderApp();
+  showPage('dashboard');
+  toast('Kehadiran terverifikasi. Selamat bekerja! ✅');
 }
 
-document.addEventListener('change' ,function(e){
+document.addEventListener('change',function(e){
   if(e.target && e.target.id==='confirmAttendance'){
     document.getElementById('confirmBtn').disabled=!(photoVerified && e.target.checked);
   }
@@ -1840,21 +1816,14 @@ function stopCamera(){
   }
 }
 
-async function logout(){
+function logout(){
   stopCamera();
-  try{if(typeof supabaseClient!=='undefined'){await supabaseClient.auth.signOut();}}catch(_){ }
   localStorage.removeItem('sa_user');
-  localStorage.removeItem('sa_checked');
-  localStorage.removeItem('sa_checkin_time');
-  localStorage.removeItem('sa_attendance_photo');
-  localStorage.removeItem('sa_attendance_date');
   state.user=null;
   state.checkedIn=false;
   document.getElementById('app').classList.add('hidden');
   document.getElementById('verificationScreen').classList.add('hidden');
   document.getElementById('loginScreen').classList.remove('hidden');
-  const pass=document.getElementById('loginPassword');
-  if(pass) pass.value='';
 }
 function renderApp(){
   document.getElementById('loginScreen').classList.add('hidden');document.getElementById('app').classList.remove('hidden');
@@ -1891,21 +1860,7 @@ function attendancePage(){
   return `<div class="checkin-wrap"><div class="page-head"><div><h1>Absensi Tim</h1><p>Hari ini kamu sudah terdaftar sebagai hadir.</p></div></div><div class="card checkin-card"><div style="font-size:50px">✅</div><h2>Check-in berhasil</h2><div class="clock">${localStorage.getItem('sa_checkin_time')||t}</div><div style="font-size:12px;color:var(--muted);margin:0 0 8px">${date}</div><span class="badge b-green">HADIR</span><p style="color:var(--muted)">Divisi: ${state.user.division}</p><button class="btn btn-primary" onclick="showPage('dashboard')">Masuk Dashboard</button><button class="btn btn-secondary" style="margin-left:8px" onclick="checkOut()">Check-out</button></div></div>`;
 }
 function checkIn(){if(state.user){document.getElementById('verificationScreen').classList.remove('hidden');document.getElementById('app').classList.add('hidden');startCamera()}else{toast('Silakan login terlebih dahulu.')}}
-async function checkOut(){
-  if(!state.user?.id || typeof supabaseClient==='undefined'){toast('Sesi pengguna belum siap.');return}
-  try{
-    const today=new Date().toISOString().slice(0,10);
-    const {error}=await supabaseClient.from('attendance').update({check_out:new Date().toISOString()}).eq('user_id',state.user.id).eq('attendance_date',today);
-    if(error) throw error;
-    state.checkedIn=false;
-    localStorage.removeItem('sa_checkin_time');
-    localStorage.removeItem('sa_attendance_photo');
-    localStorage.removeItem('sa_attendance_date');
-    save();
-    toast('Check-out berhasil. Sampai jumpa!');
-    showPage('attendance');
-  }catch(err){toast(err?.message||'Check-out gagal disimpan.');}
-}
+function checkOut(){state.checkedIn=false;localStorage.removeItem('sa_checkin_time');save();toast('Check-out berhasil. Sampai jumpa!');showPage('attendance')}
 function dashboardPage(){
   const date=todayLong();
   const time=localStorage.getItem('sa_checkin_time')||nowTime();
@@ -2203,47 +2158,18 @@ function escapeHtml(value){
 function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div><button class="btn btn-primary" onclick="openProfileModal()">Edit Profil</button></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)}
 function toggleSide(){document.getElementById('sidebar').classList.toggle('open')}
-async function bootstrapAuth(){
-  try{
-    if(typeof supabaseClient==='undefined') return;
-    const {data:{session}}=await supabaseClient.auth.getSession();
-    if(!session?.user){
-      document.getElementById('app').classList.add('hidden');
-      document.getElementById('verificationScreen').classList.add('hidden');
-      document.getElementById('loginScreen').classList.remove('hidden');
-      return;
-    }
-    const {data:profile,error}=await supabaseClient.from('profiles')
-      .select('id, full_name, division, role, avatar_url, is_active')
-      .eq('id',session.user.id).single();
-    if(error || !profile || !profile.is_active){
-      await supabaseClient.auth.signOut();
-      document.getElementById('app').classList.add('hidden');
-      document.getElementById('verificationScreen').classList.add('hidden');
-      document.getElementById('loginScreen').classList.remove('hidden');
-      return;
-    }
-    state.user={id:profile.id,email:session.user.email||'',name:profile.full_name,division:profile.division,role:profile.role,photo:profile.avatar_url||''};
-    save();
-    if(state.checkedIn){
-      document.getElementById('loginScreen').classList.add('hidden');
-      document.getElementById('verificationScreen').classList.add('hidden');
-      document.getElementById('app').classList.remove('hidden');
-      renderApp(); showPage('dashboard');
-    }else{
-      document.getElementById('app').classList.add('hidden');
-      document.getElementById('loginScreen').classList.add('hidden');
-      document.getElementById('verificationScreen').classList.remove('hidden');
-      document.getElementById('verifyName').textContent=state.user.name;
-      document.getElementById('verifyDivision').textContent=state.user.division+' • '+state.user.role;
-      const verifyAvatar=document.getElementById('verifyAvatar');
-      if(state.user.photo){verifyAvatar.innerHTML=`<img src="${state.user.photo}" alt="Foto profil" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;}
-      else{verifyAvatar.textContent=(state.user.name||'U').charAt(0).toUpperCase();}
-      document.getElementById('cameraStatus').textContent='Verifikasi hanya melalui kamera perangkat';
-    }
-  }catch(err){console.error('bootstrapAuth',err);}
+if(state.user && state.checkedIn){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('verificationScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderApp();
+  showPage('dashboard');
+}else{
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('verificationScreen').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
 }
-bootstrapAuth();
+
 
 /* ================= STAGE 1 - INTEGRATED DATA LAYER ================= */
 const STAGE1_DB_KEY = 'sa_os_database_v1';
@@ -2722,5 +2648,24 @@ financePage=function(){
 try{save();}catch(e){}
 
 
+</script>
+  <!-- 1. Load library Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- 2. Konfigurasi project lu -->
+<script>
+  const SUPABASE_URL = 'https://xexjotcqlipipgvtrkbn.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_sEbFuRz0p_tXDS4Gd1ZBrQ_LdaG2ImM';
+
+  const supabaseClient = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY
+  );
+
+  // Supabase Auth session listener: keep the app aware of the signed-in account.
+  supabaseClient.auth.onAuthStateChange((event, session)=>{
+    console.log('Supabase Auth:',event,session?.user?.email||'');
+  });
+</script>
 </body>
 </html>
