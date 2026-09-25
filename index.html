@@ -4250,7 +4250,7 @@ setTimeout(()=>{try{syncFinanceFromSupabase();}catch(e){}},1100);
 <script>
 /* =========================================================
    STAGE 2 / PEKERJAAN (TASKS) -> SUPABASE
-   V14: keeps existing UI, adds online CRUD + sync.
+   V15: keeps existing UI, adds online CRUD + sync + deadline normalization.
    ========================================================= */
 let tasksRemoteReady=false;
 let tasksSyncBusy=false;
@@ -4282,6 +4282,29 @@ async function getTaskSession(){
   return data.session.user;
 }
 
+function normalizeTaskDeadline(value){
+  const raw=String(value||'').trim();
+  if(!raw) return null;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const months={
+    januari:0,februari:1,maret:2,april:3,mei:4,juni:5,juli:6,agustus:7,september:8,oktober:9,november:10,desember:11,
+    jan:0,feb:1,mar:2,apr:3,mei:4,jun:5,jul:6,agu:7,ags:7,sep:8,okt:9,nov:10,des:11,
+    january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11
+  };
+  let m=raw.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/i);
+  if(m){
+    const day=Number(m[1]), month=months[m[2].toLowerCase()], year=Number(m[3]);
+    if(Number.isInteger(month) && day>=1 && day<=31) return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  m=raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m){
+    const a=Number(m[1]), b=Number(m[2]), year=Number(m[3]);
+    const day=a>12?a:b, month=a>12?b:a;
+    if(day>=1 && day<=31 && month>=1 && month<=12) return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  return null;
+}
+
 function localTaskPayload(t,userId){
   const program=(state.programs||[]).find(p=>p.name===t.program);
   return {
@@ -4290,7 +4313,7 @@ function localTaskPayload(t,userId){
     module_name:t.module || state.user?.division || 'Manajemen',
     program_id:program?.supabaseId || (program?.id?.length===36 ? program.id : null) || null,
     custom_program_name:program ? null : (t.program || null),
-    deadline:t.deadline || null,
+    deadline:normalizeTaskDeadline(t.deadline),
     status:t.status || 'PLAN',
     progress:Math.max(0,Math.min(100,Number(t.progress)||0)),
     pic_id:t.picId || userId,
@@ -4314,6 +4337,7 @@ async function syncTasksFromSupabase(){
     if(!remote || remote.length===0){
       const locals=(state.tasks||[]).filter(t=>t?.title);
       if(locals.length){
+        locals.forEach(t=>{ const iso=normalizeTaskDeadline(t.deadline); if(iso) t.deadline=iso; });
         const payload=locals.map(t=>localTaskPayload(t,user.id));
         const {error:seedError}=await supabaseClient.from('tasks').upsert(payload,{onConflict:'task_code'});
         if(seedError) throw seedError;
