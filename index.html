@@ -2293,30 +2293,94 @@ attendancePage = function(){
   <div class="card" style="padding:16px;margin-top:16px;overflow-x:auto"><div class="section-title" style="margin-bottom:10px">Riwayat Absensi Terbaru</div><table class="table"><thead><tr><th>Tanggal</th><th>Nama</th><th>Divisi</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr></thead><tbody>${history}</tbody></table></div>`;
 };
 
-/* Override attendance actions so check-in/check-out create records. */
-checkOut = function(){
-  stage1RecordCheckOut();
-  state.checkedIn=false;
-  localStorage.removeItem('sa_checkin_time');
-  save();
-  toast('Check-out berhasil dan masuk ke rekap absensi ✅');
-  showPage('attendance');
+/* ===== STAGE 2: REAL ATTENDANCE SYNC TO SUPABASE ===== */
+async function syncAttendanceCheckInToSupabase(){
+  if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  const {data:{user},error:userError}=await supabaseClient.auth.getUser();
+  if(userError) throw userError;
+  if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
+
+  const attendanceDate=stage1Date();
+  const payload={
+    user_id:user.id,
+    attendance_date:attendanceDate,
+    check_in:new Date().toISOString(),
+    verification_status:'Verified',
+    verification_photo_url:null,
+    notes:'Verifikasi kehadiran melalui kamera perangkat'
+  };
+
+  const {error}=await supabaseClient
+    .from('attendance')
+    .upsert(payload,{onConflict:'user_id,attendance_date'});
+  if(error) throw error;
+  return {userId:user.id,attendanceDate};
+}
+
+async function syncAttendanceCheckOutToSupabase(){
+  if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  const {data:{user},error:userError}=await supabaseClient.auth.getUser();
+  if(userError) throw userError;
+  if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
+
+  const {data,error}=await supabaseClient
+    .from('attendance')
+    .update({check_out:new Date().toISOString()})
+    .eq('user_id',user.id)
+    .eq('attendance_date',stage1Date())
+    .select('id')
+    .maybeSingle();
+
+  if(error) throw error;
+  if(!data) throw new Error('Record absensi hari ini belum ditemukan di Supabase.');
+  return data;
+}
+
+/* Override attendance actions: Supabase is the source of truth, local Stage 1 is kept as a mirror. */
+checkOut = async function(){
+  try{
+    await syncAttendanceCheckOutToSupabase();
+    stage1RecordCheckOut();
+    state.checkedIn=false;
+    localStorage.removeItem('sa_checkin_time');
+    save();
+    toast('Check-out berhasil dan tersimpan di Supabase ✅');
+    showPage('attendance');
+  }catch(err){
+    console.error('SUPABASE CHECK-OUT ERROR:',err);
+    toast('Check-out gagal: '+(err?.message||'Unknown error'));
+  }
 };
 
-confirmAttendance = function(){
+confirmAttendance = async function(){
   const checkbox=document.getElementById('confirmAttendance');
-  if(!photoVerified || !checkbox?.checked){ toast('Ambil foto dan konfirmasi kehadiran terlebih dahulu.'); return; }
-  state.checkedIn=true;
-  localStorage.setItem('sa_checkin_time',nowTime());
-  localStorage.setItem('sa_attendance_photo','verified');
-  localStorage.setItem('sa_attendance_date',stage1Date());
-  stage1RecordCheckIn();
-  save();
-  stopCamera();
-  document.getElementById('verificationScreen').classList.add('hidden');
-  renderApp();
-  showPage('dashboard');
-  toast('Kehadiran terverifikasi dan tercatat ✅');
+  const button=document.getElementById('confirmBtn');
+  if(!photoVerified || !checkbox?.checked){
+    toast('Ambil foto dan konfirmasi kehadiran terlebih dahulu.');
+    return;
+  }
+  button.disabled=true;
+  button.textContent='MENYIMPAN ABSENSI...';
+  try{
+    await syncAttendanceCheckInToSupabase();
+    state.checkedIn=true;
+    localStorage.setItem('sa_checkin_time',nowTime());
+    localStorage.setItem('sa_attendance_photo','verified');
+    localStorage.setItem('sa_attendance_date',stage1Date());
+    stage1RecordCheckIn();
+    save();
+    stopCamera();
+    document.getElementById('verificationScreen').classList.add('hidden');
+    renderApp();
+    showPage('dashboard');
+    toast('Kehadiran tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('SUPABASE CHECK-IN ERROR:',err);
+    toast('Absensi belum tersimpan: '+(err?.message||'Unknown error'));
+  }finally{
+    button.disabled=false;
+    button.textContent='KONFIRMASI & MASUK DASHBOARD';
+  }
 };
 
 /* Integrated report helpers. */
