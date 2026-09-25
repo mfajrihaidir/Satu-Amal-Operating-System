@@ -2619,5 +2619,18 @@ try{save();}catch(e){}
 
 
 </script>
+  <!-- 1. Load library Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- 2. Konfigurasi project lu -->
+<script>
+  const SUPABASE_URL = 'https://xexjotcqlipipgvtrkbn.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_sEbFuRz0p_tXDS4Gd1ZBrQ_LdaG2ImM';
+
+  const supabaseClient = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY
+  );
+</script>
 </body>
 </html>
