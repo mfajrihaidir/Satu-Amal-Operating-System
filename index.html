@@ -3632,5 +3632,221 @@ async function deletePartnership(id){
   }
 }
 </script>
+
+<!-- STAGE 2 — DOKUMENTASI → SUPABASE -->
+<script>
+let docsRemoteReady=false;
+let docsSyncBusy=false;
+
+function docsRemoteRowToState(r){
+  const programId=r.program_id||'';
+  const linkedProgram=state.programs.find(p=>p.supabaseId===programId||p.id===programId);
+  const programName=r.custom_program_name||linkedProgram?.name||'';
+  return {
+    id:r.code || ('DOC-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    code:r.code||'',
+    title:r.title||'',
+    type:r.doc_type||'Foto',
+    program:programName,
+    programId:programId,
+    date:r.captured_date||dateId(),
+    files:Number(r.file_count||0),
+    picId:r.pic_id||'',
+    pic:r.pic_name||(r.pic_id===state.user?.id?state.user?.name:'')||'PIC',
+    link:r.drive_url||'',
+    notes:r.notes||''
+  };
+}
+
+function localDocPayload(x,userId){
+  const p=state.programs.find(a=>a.id===x.programId||a.name===x.program||a.supabaseId===x.programId);
+  return {
+    code:x.code||x.id,
+    program_id:p?.supabaseId||x.programId||null,
+    custom_program_name:(!p && x.program)?x.program:null,
+    title:x.title||'',
+    doc_type:x.type||'Foto',
+    file_count:Math.max(0,Number(x.files)||0),
+    drive_url:x.link||null,
+    captured_date:x.date||dateId(),
+    pic_id:x.picId||userId,
+    pic_name:x.pic||state.user?.name||'',
+    notes:x.notes||null
+  };
+}
+
+async function syncDocsFromSupabase(){
+  if(docsSyncBusy||docsRemoteReady)return;
+  docsSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('documentation')
+      .select('id,code,program_id,custom_program_name,title,doc_type,file_count,drive_url,captured_date,pic_id,pic_name,notes,created_at,updated_at')
+      .order('captured_date',{ascending:false,nullsLast:true})
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+
+    if(!remote||remote.length===0){
+      const locals=(state.documents||[]).filter(x=>x?.title);
+      if(locals.length){
+        const payload=locals.map(x=>localDocPayload(x,user.id));
+        const {error:insertError}=await supabaseClient
+          .from('documentation')
+          .upsert(payload,{onConflict:'code'});
+        if(insertError)throw insertError;
+
+        const {data:seeded,error:seedError}=await supabaseClient
+          .from('documentation')
+          .select('id,code,program_id,custom_program_name,title,doc_type,file_count,drive_url,captured_date,pic_id,pic_name,notes,created_at,updated_at')
+          .order('captured_date',{ascending:false,nullsLast:true})
+          .order('created_at',{ascending:true});
+        if(seedError)throw seedError;
+        state.documents=(seeded||[]).map(docsRemoteRowToState);
+      }else{
+        state.documents=[];
+      }
+    }else{
+      state.documents=remote.map(docsRemoteRowToState);
+    }
+
+    localStorage.setItem('sa_documents_supabase_loaded','true');
+    save();
+    docsRemoteReady=true;
+    if(document.getElementById('topTitle')?.textContent==='Dokumentasi')showPage('docs');
+    toast('Data Dokumentasi tersinkron ke Supabase ✅');
+  }catch(err){
+    console.error('Documentation sync error',err);
+    toast('Dokumentasi online gagal dimuat: '+(err?.message||'Unknown error'));
+  }finally{
+    docsSyncBusy=false;
+  }
+}
+
+function docsPage(){
+  if(!docsRemoteReady)setTimeout(syncDocsFromSupabase,0);
+  const photos=state.documents.filter(x=>String(x.type||'').includes('Foto')).reduce((a,x)=>a+Number(x.files||0),0);
+  const videos=state.documents.filter(x=>String(x.type||'').includes('Video')).reduce((a,x)=>a+Number(x.files||0),0);
+  return `<div class="module-page">
+    <div class="page-head">
+      <div><h1>Dokumentasi</h1><p>Arsip bukti kegiatan, foto, video dan tautan dokumentasi yang terhubung dengan program.</p></div>
+      <button class="btn btn-primary" onclick="openDoc()">+ Upload Dokumentasi</button>
+    </div>
+    <div class="grid kpis">
+      ${kpiPlain('Total File',String(state.documents.reduce((a,x)=>a+Number(x.files||0),0)),'Arsip')}
+      ${kpiPlain('Foto',String(photos),'File')}
+      ${kpiPlain('Video',String(videos),'File')}
+      ${kpiPlain('Dokumen Kegiatan',String(state.documents.length),'Entri')}
+    </div>
+    <div class="card" style="margin-top:16px;padding:16px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Data tersimpan di Supabase</div>
+      ${moduleToolbar('Cari judul, program, tipe...', '')}
+      <div style="overflow-x:auto"><table class="table">
+        <thead><tr><th>Judul</th><th>Tipe</th><th>Program</th><th>Tanggal</th><th>File</th><th>PIC</th><th>Link</th><th>Aksi</th></tr></thead>
+        <tbody id="moduleTableBody">
+          ${state.documents.map(x=>`<tr data-search="${esc([x.title,x.type,x.program,x.pic].join(' '))}">
+            <td><strong>${esc(x.title)}</strong><br><small>${esc(x.notes||'')}</small></td>
+            <td>${esc(x.type)}</td><td>${esc(x.program||'-')}</td><td>${esc(x.date||'-')}</td>
+            <td>${Number(x.files||0)}</td><td>${esc(x.pic||'-')}</td>
+            <td>${x.link?`<a href="${esc(x.link)}" target="_blank" rel="noopener">Buka</a>`:'-'}</td>
+            <td><button class="btn btn-secondary btn-small" onclick="openDoc('${esc(x.id)}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteDoc('${esc(x.id)}')">Hapus</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  </div>`;
+}
+
+function openDoc(id){
+  const x=state.documents.find(a=>a.id===id)||{
+    id:'DOC-'+String(Date.now()).slice(-6),
+    title:'',
+    type:'Foto',
+    program:state.programs[0]?.name||'',
+    date:dateId(),
+    files:0,
+    pic:state.user?.name||'Admin Satu Amal',
+    link:'',
+    notes:''
+  };
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Dokumentasi</h2>
+  <div class="form-grid">
+    <div class="field"><label>Judul Kegiatan</label><input id="dTitle" value="${esc(x.title)}"></div>
+    <div class="field"><label>Nama Program</label><input id="dProgram" list="docProgramNames" value="${esc(x.program)}" placeholder="Pilih dari daftar atau ketik manual"><datalist id="docProgramNames">${state.programs.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist></div>
+    <div class="field"><label>Tipe</label><select id="dType">${['Foto','Video','Foto + Video','Dokumen'].map(v=>`<option ${v===x.type?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="field"><label>Tanggal</label><input id="dDate" type="date" value="${esc(x.date||dateId())}"></div>
+    <div class="field"><label>Jumlah File</label><input id="dFiles" type="number" min="0" value="${Number(x.files)||0}"></div>
+    <div class="field"><label>PIC</label><input id="dPic" value="${esc(x.pic||state.user?.name||'')}"></div>
+    <div class="field full"><label>Link Google Drive / Arsip</label><input id="dLink" type="url" value="${esc(x.link||'')}" placeholder="https://drive.google.com/"></div>
+    <div class="field full"><label>Catatan</label><textarea id="dNotes" rows="3" placeholder="Catatan dokumentasi">${esc(x.notes||'')}</textarea></div>
+  </div>
+  <div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveDoc('${esc(id||'')}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function saveDoc(id){
+  const title=document.getElementById('dTitle').value.trim();
+  if(!title){toast('Judul dokumentasi wajib diisi.');document.getElementById('dTitle').focus();return;}
+  try{
+    const user=await getProgramSession();
+    const existing=state.documents.find(x=>x.id===id);
+    const programName=document.getElementById('dProgram').value.trim();
+    const program=state.programs.find(p=>p.name===programName);
+    const data={
+      id:id||'DOC-'+String(Date.now()).slice(-6),
+      title,
+      type:document.getElementById('dType').value,
+      program:programName,
+      programId:program?.supabaseId||'',
+      date:document.getElementById('dDate').value||dateId(),
+      files:moneyNumber(document.getElementById('dFiles').value),
+      pic:document.getElementById('dPic').value.trim()||state.user?.name||'Admin Satu Amal',
+      link:document.getElementById('dLink').value.trim(),
+      notes:document.getElementById('dNotes').value.trim(),
+      supabaseId:existing?.supabaseId||''
+    };
+    const payload=localDocPayload(data,user.id);
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('documentation').update(payload).eq('id',existing.supabaseId)
+        .select('id,code,program_id,custom_program_name,title,doc_type,file_count,drive_url,captured_date,pic_id,pic_name,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('documentation').upsert(payload,{onConflict:'code'})
+        .select('id,code,program_id,custom_program_name,title,doc_type,file_count,drive_url,captured_date,pic_id,pic_name,notes,created_at,updated_at').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+    const mapped=docsRemoteRowToState(remote);
+    const idx=state.documents.findIndex(x=>x.id===id);
+    if(idx>=0)state.documents[idx]=mapped;else state.documents.unshift(mapped);
+    save();docsRemoteReady=true;closeModal();showPage('docs');toast('Dokumentasi tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveDoc error',err);
+    toast('Gagal menyimpan Dokumentasi: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteDoc(id){
+  if(!confirm('Hapus dokumentasi ini?'))return;
+  const x=state.documents.find(a=>a.id===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('documentation').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.code){
+      const {error}=await supabaseClient.from('documentation').delete().eq('code',x.code);
+      if(error)throw error;
+    }
+    state.documents=state.documents.filter(a=>a.id!==id);
+    save();showPage('docs');toast('Dokumentasi dihapus dari Supabase ✅');
+  }catch(err){
+    console.error('deleteDoc error',err);
+    toast('Gagal menghapus Dokumentasi: '+(err?.message||'Unknown error'));
+  }
+}
+</script>
+
 </body>
 </html>
