@@ -4246,5 +4246,225 @@ window.deleteFinance=deleteFinanceRemote;
 setTimeout(()=>{try{syncFinanceFromSupabase();}catch(e){}},1100);
 </script>
 
+
+<script>
+/* =========================================================
+   STAGE 2 / PEKERJAAN (TASKS) -> SUPABASE
+   V14: keeps existing UI, adds online CRUD + sync.
+   ========================================================= */
+let tasksRemoteReady=false;
+let tasksSyncBusy=false;
+
+function taskRemoteRowToState(r){
+  const p=(state.programs||[]).find(x=>(x.supabaseId||x.id)===r.program_id);
+  return {
+    id:r.task_code || ('WRK-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId:r.id||'',
+    title:r.title||'',
+    module:r.module_name||state.user?.division||'Manajemen',
+    program:p?.name || r.custom_program_name || '',
+    programId:r.program_id||'',
+    customProgramName:r.custom_program_name||'',
+    deadline:r.deadline||'',
+    status:r.status||'PLAN',
+    progress:Number(r.progress||0),
+    pic:r.pic_name || state.user?.name || 'Admin Satu Amal',
+    picId:r.pic_id||'',
+    notes:r.notes||''
+  };
+}
+
+async function getTaskSession(){
+  if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  const {data,error}=await supabaseClient.auth.getSession();
+  if(error) throw error;
+  if(!data?.session?.user) throw new Error('Sesi login Supabase tidak ditemukan.');
+  return data.session.user;
+}
+
+function localTaskPayload(t,userId){
+  const program=(state.programs||[]).find(p=>p.name===t.program);
+  return {
+    task_code:t.id || ('WRK-'+String(Date.now()).slice(-6)),
+    title:t.title,
+    module_name:t.module || state.user?.division || 'Manajemen',
+    program_id:program?.supabaseId || (program?.id?.length===36 ? program.id : null) || null,
+    custom_program_name:program ? null : (t.program || null),
+    deadline:t.deadline || null,
+    status:t.status || 'PLAN',
+    progress:Math.max(0,Math.min(100,Number(t.progress)||0)),
+    pic_id:t.picId || userId,
+    pic_name:t.pic || state.user?.name || 'Admin Satu Amal',
+    notes:t.notes || null,
+    created_by:userId
+  };
+}
+
+async function syncTasksFromSupabase(){
+  if(tasksSyncBusy || tasksRemoteReady) return;
+  tasksSyncBusy=true;
+  try{
+    const user=await getTaskSession();
+    const {data:remote,error}=await supabaseClient
+      .from('tasks')
+      .select('id,task_code,title,module_name,program_id,custom_program_name,deadline,status,progress,pic_id,pic_name,notes,created_by,created_at,updated_at')
+      .order('created_at',{ascending:true});
+    if(error) throw error;
+
+    if(!remote || remote.length===0){
+      const locals=(state.tasks||[]).filter(t=>t?.title);
+      if(locals.length){
+        const payload=locals.map(t=>localTaskPayload(t,user.id));
+        const {error:seedError}=await supabaseClient.from('tasks').upsert(payload,{onConflict:'task_code'});
+        if(seedError) throw seedError;
+        const {data:seeded,error:seedReadError}=await supabaseClient
+          .from('tasks')
+          .select('id,task_code,title,module_name,program_id,custom_program_name,deadline,status,progress,pic_id,pic_name,notes,created_by,created_at,updated_at')
+          .order('created_at',{ascending:true});
+        if(seedReadError) throw seedReadError;
+        state.tasks=(seeded||[]).map(taskRemoteRowToState);
+      }else{
+        state.tasks=[];
+      }
+    }else{
+      state.tasks=remote.map(taskRemoteRowToState);
+    }
+    tasksRemoteReady=true;
+    save();
+  }catch(err){
+    console.error('syncTasksFromSupabase error',err);
+    toast('Gagal memuat Pekerjaan dari Supabase: '+(err?.message||'Unknown error'));
+  }finally{
+    tasksSyncBusy=false;
+  }
+}
+
+function tasksPageOnline(){
+  const rows=(state.tasks||[]);
+  const today=new Date(); today.setHours(0,0,0,0);
+  let late=0,due=0,progressing=0,completed=0;
+  rows.forEach(t=>{
+    const d=t.deadline?new Date(t.deadline+'T00:00:00'):null;
+    if(t.status==='COMPLETED') completed++;
+    else if(t.status==='IN PROGRESS' || (Number(t.progress||0)>0 && Number(t.progress||0)<100)) progressing++;
+    if(d && d<today && t.status!=='COMPLETED') late++;
+    if(d && d.getTime()===today.getTime() && t.status!=='COMPLETED') due++;
+  });
+  return `<div class="page-head"><div><h1>Pekerjaan Saya</h1><p>Semua pekerjaan yang menjadi tanggung jawabmu.</p></div><button class="btn btn-primary" onclick="openTaskOnline()">+ Tambah Pekerjaan</button></div>
+  <div class="grid kpis">${kpi('🔴','Terlambat',String(late),'Perlu segera ditindaklanjuti')}${kpi('🟡','Jatuh Tempo',String(due),'Hari ini')}${kpi('🔵','Sedang Dikerjakan',String(progressing),'Dalam proses')}${kpi('🟢','Selesai',String(completed),'Data tersimpan online')}</div>
+  <div class="card" style="margin-top:16px"><table class="table"><thead><tr><th>Pekerjaan</th><th>Program</th><th>Deadline</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td><strong>${escapeHtml(t.title)}</strong><br><small>${escapeHtml(t.id||'')}</small></td><td>${escapeHtml(t.program||'Tanpa Program')}</td><td>${escapeHtml(t.deadline||'-')}</td><td><span class="badge ${t.status==='COMPLETED'?'b-green':t.status==='IN PROGRESS'?'b-blue':t.status==='PLAN'?'b-yellow':'b-purple'}">${escapeHtml(t.status||'PLAN')}</span></td><td>${Number(t.progress||0)}%</td><td style="white-space:nowrap"><button class="btn btn-secondary btn-small" onclick="openTaskOnline('${escapeHtml(t.id||'')}')">Update</button> <button class="btn btn-danger btn-small" onclick="deleteTaskRemote('${escapeHtml(t.id||'')}')">Hapus</button></td></tr>`).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:25px">Belum ada pekerjaan.</td></tr>`}</tbody></table></div>
+  <div style="margin-top:10px;font-size:11px;color:var(--muted)">Data Pekerjaan tersimpan di Supabase.</div>`;
+}
+
+function openTaskOnline(id){
+  const t=(state.tasks||[]).find(x=>x.id===id)||{id:'WRK-'+String(Date.now()).slice(-5),title:'',module:state.user?.division||'',program:'',deadline:'',status:'PLAN',progress:0,pic:state.user?.name||'',notes:''};
+  const programOptions=(state.programs||[]).map(p=>`<option ${p.name===t.program?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+  const modules=['Manajemen','Fundraising','CRM','Marketing','Program','Konten','Kemitraan','Dokumentasi','Administrasi','Keuangan'];
+  const moduleOptions=modules.map(v=>`<option ${v===t.module?'selected':''}>${v}</option>`).join('');
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Pekerjaan</h2><div class="form-grid"><div class="field"><label>Nama Pekerjaan</label><input id="fTitle" value="${escapeHtml(t.title||'')}"></div><div class="field"><label>Program</label><select id="fProgram"><option value="">Tanpa Program</option>${programOptions}</select></div><div class="field"><label>Divisi / Modul</label><select id="fModule">${moduleOptions}</select></div><div class="field"><label>Deadline</label><input id="fDeadline" type="date" value="${escapeHtml(t.deadline||'')}"></div><div class="field"><label>Status</label><select id="fStatus"><option ${t.status==='PLAN'?'selected':''}>PLAN</option><option ${t.status==='ASSIGNED'?'selected':''}>ASSIGNED</option><option ${t.status==='IN PROGRESS'?'selected':''}>IN PROGRESS</option><option ${t.status==='REVIEW'?'selected':''}>REVIEW</option><option ${t.status==='COMPLETED'?'selected':''}>COMPLETED</option><option ${t.status==='EVALUATED'?'selected':''}>EVALUATED</option></select></div><div class="field"><label>Progress (%)</label><input id="fProgress" type="number" min="0" max="100" value="${Number(t.progress||0)}"></div><div class="field full"><label>Catatan</label><textarea id="fNotes" rows="3">${escapeHtml(t.notes||'')}</textarea></div></div><div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveTaskRemote('${id||''}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function saveTaskRemote(id){
+  const user=await getTaskSession().catch(err=>{toast(err?.message||'Sesi login tidak ditemukan.');return null;});
+  if(!user)return;
+  const programName=document.getElementById('fProgram').value||'';
+  const program=(state.programs||[]).find(p=>p.name===programName);
+  const data={
+    id:id||'WRK-'+String(Date.now()).slice(-6),
+    title:document.getElementById('fTitle').value.trim(),
+    module:document.getElementById('fModule').value,
+    program:programName,
+    programId:program?.supabaseId||'',
+    deadline:document.getElementById('fDeadline').value||'',
+    status:document.getElementById('fStatus').value,
+    progress:Math.max(0,Math.min(100,Number(document.getElementById('fProgress').value)||0)),
+    pic:state.user?.name||'Admin Satu Amal',
+    picId:user.id,
+    notes:document.getElementById('fNotes').value.trim()
+  };
+  if(!data.title){toast('Nama pekerjaan wajib diisi.');return;}
+  const payload={
+    task_code:data.id,
+    title:data.title,
+    module_name:data.module,
+    program_id:program?.supabaseId||null,
+    custom_program_name:program?null:(programName||null),
+    deadline:data.deadline||null,
+    status:data.status,
+    progress:data.progress,
+    pic_id:user.id,
+    pic_name:data.pic,
+    notes:data.notes||null,
+    created_by:user.id
+  };
+  try{
+    const existing=(state.tasks||[]).find(x=>x.id===id);
+    let error=null;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('tasks').update(payload).eq('id',existing.supabaseId);
+      error=result.error;
+    }else{
+      const result=await supabaseClient.from('tasks').upsert(payload,{onConflict:'task_code'});
+      error=result.error;
+    }
+    if(error)throw error;
+    await syncTasksFromSupabase();
+    tasksRemoteReady=false;
+    await syncTasksFromSupabase();
+    closeModal();
+    showPage('work');
+    toast('Pekerjaan tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveTaskRemote error',err);
+    toast('Gagal menyimpan Pekerjaan: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function deleteTaskRemote(id){
+  if(!confirm('Hapus pekerjaan ini?'))return;
+  const x=(state.tasks||[]).find(a=>a.id===id||a.supabaseId===id);
+  try{
+    if(x?.supabaseId){
+      const {error}=await supabaseClient.from('tasks').delete().eq('id',x.supabaseId);
+      if(error)throw error;
+    }else if(x?.id){
+      const {error}=await supabaseClient.from('tasks').delete().eq('task_code',x.id);
+      if(error)throw error;
+    }
+    state.tasks=(state.tasks||[]).filter(a=>a.id!==id && a.supabaseId!==id);
+    save();
+    tasksRemoteReady=true;
+    showPage('work');
+    toast('Pekerjaan dihapus dari Supabase ✅');
+  }catch(err){
+    console.error('deleteTaskRemote error',err);
+    toast('Gagal menghapus Pekerjaan: '+(err?.message||'Unknown error'));
+  }
+}
+
+const _showPageBeforeTasksRemote=showPage;
+showPage=function(page){
+  if(page==='work'){
+    if(!state.checkedIn){toast('Silakan check-in terlebih dahulu.');page='attendance';}
+    if(page==='work'){
+      document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+      document.getElementById('topTitle').textContent='Pekerjaan Saya';
+      document.getElementById('content').innerHTML=tasksPageOnline();
+      document.getElementById('sidebar').classList.remove('open');
+      syncTasksFromSupabase().then(()=>{if(document.getElementById('topTitle')?.textContent==='Pekerjaan Saya'){document.getElementById('content').innerHTML=tasksPageOnline();}});
+      return;
+    }
+  }
+  _showPageBeforeTasksRemote(page);
+};
+
+window.openTask=openTaskOnline;
+window.saveTask=saveTaskRemote;
+window.deleteTaskRemote=deleteTaskRemote;
+
+setTimeout(()=>{try{syncTasksFromSupabase();}catch(e){}},1300);
+</script>
+
 </body>
 </html>
