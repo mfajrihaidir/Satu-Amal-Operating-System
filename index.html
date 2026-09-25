@@ -1432,6 +1432,15 @@ body{
     pointer-events:none !important;
   }
 }
+
+/* ===== PASSWORD RECOVERY V6 ===== */
+.recovery-link-v6{display:block;width:100%;margin-top:11px;border:0;background:transparent;color:#536b80;font-size:12px;font-weight:750;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.recovery-link-v6:hover{color:#0d6efd}
+.recovery-modal-v6{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:20px;background:rgba(8,28,44,.45);backdrop-filter:blur(4px)}
+.recovery-modal-v6.hidden{display:none}
+.recovery-card-v6{width:min(460px,100%);background:#fff;border:1px solid #e5ebef;border-radius:22px;padding:26px;box-shadow:0 25px 70px rgba(10,49,69,.18)}
+.recovery-card-v6 h2{margin:0;color:#17283a;font-size:22px}.recovery-card-v6 p{margin:7px 0 18px;color:#6b7b89;font-size:13px;line-height:1.55}
+.recovery-actions-v6{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -1457,6 +1466,7 @@ body{
       </div>
 
       <button class="btn btn-primary login-btn-v4" id="loginButton" type="button" onclick="login()">MASUK KE SISTEM</button>
+      <button type="button" class="recovery-link-v6" onclick="sendRecoveryEmail()">Lupa password?</button>
       <div id="loginError" style="display:none;margin-top:12px;padding:11px 13px;border-radius:10px;background:#fff3f3;color:#b42318;font-size:12px;line-height:1.5"></div>
     </div>
 
@@ -2665,7 +2675,74 @@ try{save();}catch(e){}
   // Supabase Auth session listener: keep the app aware of the signed-in account.
   supabaseClient.auth.onAuthStateChange((event, session)=>{
     console.log('Supabase Auth:',event,session?.user?.email||'');
+    if(event === 'PASSWORD_RECOVERY'){
+      const modal=document.getElementById('recoveryModalV6');
+      if(modal) modal.classList.remove('hidden');
+      document.getElementById('recoveryPasswordV6')?.focus();
+    }
   });
+
+  async function sendRecoveryEmail(){
+    const email=(document.getElementById('loginEmail')?.value||'').trim();
+    if(!email){
+      toast('Masukkan email akun dulu.');
+      document.getElementById('loginEmail')?.focus();
+      return;
+    }
+    const redirectTo = window.location.origin + window.location.pathname;
+    try{
+      const {error}=await supabaseClient.auth.resetPasswordForEmail(email,{redirectTo});
+      if(error) throw error;
+      toast('Link reset password sudah dikirim ke email. 📩');
+    }catch(err){
+      toast('Gagal mengirim reset password: '+(err?.message||'Unknown error'));
+    }
+  }
+
+  async function saveRecoveredPassword(){
+    const p1=document.getElementById('recoveryPasswordV6')?.value||'';
+    const p2=document.getElementById('recoveryPasswordConfirmV6')?.value||'';
+    const errBox=document.getElementById('recoveryErrorV6');
+    const btn=document.getElementById('recoverySaveBtnV6');
+    errBox.style.display='none';
+    errBox.textContent='';
+    if(p1.length<6){errBox.textContent='Password minimal 6 karakter.';errBox.style.display='block';return;}
+    if(p1!==p2){errBox.textContent='Konfirmasi password belum sama.';errBox.style.display='block';return;}
+    btn.disabled=true;btn.textContent='MENYIMPAN...';
+    try{
+      const {error}=await supabaseClient.auth.updateUser({password:p1});
+      if(error) throw error;
+      toast('Password berhasil diperbarui. ✅');
+      document.getElementById('recoveryPasswordV6').value='';
+      document.getElementById('recoveryPasswordConfirmV6').value='';
+      document.getElementById('recoveryModalV6').classList.add('hidden');
+    }catch(err){
+      errBox.textContent=err?.message||'Password gagal diperbarui.';
+      errBox.style.display='block';
+    }finally{
+      btn.disabled=false;btn.textContent='SIMPAN PASSWORD';
+    }
+  }
 </script>
+
+<div id="recoveryModalV6" class="recovery-modal-v6 hidden">
+  <div class="recovery-card-v6">
+    <h2>Buat Password Baru</h2>
+    <p>Link pemulihan berhasil dibuka. Masukkan password baru untuk akun Satu Amal Indonesia.</p>
+    <div class="field">
+      <label>PASSWORD BARU</label>
+      <input id="recoveryPasswordV6" type="password" placeholder="Minimal 6 karakter" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>KONFIRMASI PASSWORD</label>
+      <input id="recoveryPasswordConfirmV6" type="password" placeholder="Ulangi password baru" autocomplete="new-password">
+    </div>
+    <div id="recoveryErrorV6" style="display:none;margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff3f3;color:#b42318;font-size:12px;line-height:1.5"></div>
+    <div class="recovery-actions-v6">
+      <button type="button" class="btn btn-primary" id="recoverySaveBtnV6" onclick="saveRecoveredPassword()">SIMPAN PASSWORD</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
