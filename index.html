@@ -1971,7 +1971,95 @@ function closeModal(){document.getElementById('modal').classList.add('hidden')}
 function modulePage(title,subtitle,kpis,rows,button){return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div>${button?`<button class="btn btn-primary" onclick="toast('Form ${title} siap dikembangkan')">+ ${button}</button>`:''}</div><div class="grid kpis">${kpis.join('')}</div><div class="card" style="margin-top:16px"><div class="section-title">Data Terbaru</div><table class="table"><thead><tr><th>Nama</th><th>Status</th><th>PIC</th><th>Update</th></tr></thead><tbody>${rows.map(r=>`<tr><td><strong>${r[0]}</strong></td><td><span class="badge ${r[1]==='SELESAI'||r[1]==='AKTIF'?'b-green':r[1]==='PROSES'?'b-blue':'b-yellow'}">${r[1]}</span></td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join('')}</tbody></table></div>`}
 function rupiah(n){return 'Rp'+Number(n||0).toLocaleString('id-ID')}
 function programStatusClass(status){return status==='ON TRACK'?'b-green':status==='AT RISK'?'b-yellow':'b-red'}
+let programSyncBusy=false;
+let programRemoteReady=false;
+
+function programRemoteRowToState(r){
+  return {
+    id: r.code || ('PRG-'+String(r.id||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,8)),
+    supabaseId: r.id || '',
+    code: r.code || '',
+    name: r.name || '',
+    category: r.category || 'Kemanusiaan',
+    pic: r.pic_name || state.user?.name || 'Admin Satu Amal',
+    picId: r.pic_id || '',
+    status: r.status || 'ON TRACK',
+    progress: Number(r.progress || 0),
+    budget: Number(r.budget || 0),
+    realization: Number(r.realization || 0),
+    description: r.description || '',
+    target: Number(r.target || 0)
+  };
+}
+
+async function getProgramSession(){
+  if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  const {data,error}=await supabaseClient.auth.getSession();
+  if(error) throw error;
+  if(!data?.session?.user) throw new Error('Sesi login Supabase tidak ditemukan.');
+  return data.session.user;
+}
+
+function localProgramPayload(p,userId){
+  return {
+    code: p.code || p.id,
+    name: p.name,
+    category: p.category || 'Kemanusiaan',
+    description: p.description || null,
+    budget: Math.max(0,Number(p.budget)||0),
+    realization: Math.max(0,Number(p.realization)||0),
+    progress: Math.max(0,Math.min(100,Number(p.progress)||0)),
+    status: p.status || 'ON TRACK',
+    pic_id: p.picId || userId,
+    pic_name: p.pic || '',
+    created_by: userId
+  };
+}
+
+async function syncProgramsFromSupabase(){
+  if(programSyncBusy || programRemoteReady) return;
+  programSyncBusy=true;
+  try{
+    const user=await getProgramSession();
+    const {data:remote,error}=await supabaseClient
+      .from('programs')
+      .select('id,code,name,category,description,target,budget,realization,progress,status,pic_id,pic_name,created_by,created_at,updated_at')
+      .order('created_at',{ascending:true});
+    if(error) throw error;
+
+    if(!remote || remote.length===0){
+      const locals=(state.programs||[]).filter(p=>p?.name);
+      if(locals.length){
+        const payload=locals.map(p=>localProgramPayload(p,user.id));
+        const {error:insertError}=await supabaseClient.from('programs').upsert(payload,{onConflict:'code'});
+        if(insertError) throw insertError;
+        const {data:seeded,error:seedError}=await supabaseClient
+          .from('programs')
+          .select('id,code,name,category,description,target,budget,realization,progress,status,pic_id,pic_name,created_by,created_at,updated_at')
+          .order('created_at',{ascending:true});
+        if(seedError) throw seedError;
+        state.programs=(seeded||[]).map(programRemoteRowToState);
+      }else{
+        state.programs=[];
+      }
+    }else{
+      state.programs=remote.map(programRemoteRowToState);
+    }
+    localStorage.setItem('sa_programs_supabase_loaded','true');
+    save();
+    programRemoteReady=true;
+    if(document.getElementById('topTitle')?.textContent==='Program') showPage('program');
+    toast('Data Program tersinkron ke Supabase ✅');
+  }catch(err){
+    console.error('Program sync error',err);
+    toast('Program online gagal dimuat: '+(err?.message||'Unknown error'));
+  }finally{
+    programSyncBusy=false;
+  }
+}
+
 function programPage(){
+  if(!programRemoteReady) setTimeout(syncProgramsFromSupabase,0);
   const totalBudget=state.programs.reduce((a,p)=>a+Number(p.budget||0),0);
   const totalReal=state.programs.reduce((a,p)=>a+Number(p.realization||0),0);
   const onTrack=state.programs.filter(p=>p.status==='ON TRACK').length;
@@ -1984,47 +2072,85 @@ function programPage(){
     ${kpiPlain('Realisasi Anggaran',rupiah(totalReal),`dari ${rupiah(totalBudget)}`)}
   </div>
   <div class="card" style="margin-top:16px;overflow-x:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 6px;gap:10px;flex-wrap:wrap"><div class="section-title">Daftar Program</div><small style="color:var(--muted)">Data tersimpan di browser ini</small></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 6px;gap:10px;flex-wrap:wrap"><div class="section-title">Daftar Program</div><small style="color:var(--muted)">Tersimpan di Supabase</small></div>
     <table class="table"><thead><tr><th>Program</th><th>Kategori</th><th>PIC</th><th>Status</th><th>Progress</th><th>Anggaran</th><th>Realisasi</th><th>Aksi</th></tr></thead>
     <tbody>${state.programs.map(p=>`<tr>
-      <td><strong>${p.name}</strong><br><small>${p.description||''}</small></td>
-      <td>${p.category}</td><td>${p.pic}</td>
-      <td><span class="badge ${programStatusClass(p.status)}">${p.status}</span></td>
-      <td><div style="min-width:100px"><div class="bar"><span style="width:${Math.max(0,Math.min(100,Number(p.progress)||0))}%"></span></div><small>${p.progress}%</small></div></td>
+      <td><strong>${esc(p.name)}</strong><br><small>${esc(p.description||'')}</small></td>
+      <td>${esc(p.category)}</td><td>${esc(p.pic||state.user?.name||'-')}</td>
+      <td><span class="badge ${programStatusClass(p.status)}">${esc(p.status)}</span></td>
+      <td><div style="min-width:100px"><div class="bar"><span style="width:${Math.max(0,Math.min(100,Number(p.progress)||0))}%"></span></div><small>${Number(p.progress)||0}%</small></div></td>
       <td>${rupiah(p.budget)}</td><td>${rupiah(p.realization)}</td>
-      <td><button class="btn btn-secondary btn-small" onclick="openProgram('${p.id}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteProgram('${p.id}')">Hapus</button></td>
+      <td><button class="btn btn-secondary btn-small" onclick="openProgram('${esc(p.id)}')">Edit</button> <button class="btn btn-danger btn-small" onclick="deleteProgram('${esc(p.id)}')">Hapus</button></td>
     </tr>`).join('')}</tbody></table>
   </div></div>`;
 }
 function openProgram(id){
-  const p=state.programs.find(x=>x.id===id)||{id:'PRG-'+String(Date.now()).slice(-6),name:'',category:'Kemanusiaan',pic:state.user.name,status:'ON TRACK',progress:0,budget:0,realization:0,description:''};
+  const p=state.programs.find(x=>x.id===id)||{id:'PRG-'+String(Date.now()).slice(-6),name:'',category:'Kemanusiaan',pic:state.user?.name||'Admin Satu Amal',status:'ON TRACK',progress:0,budget:0,realization:0,description:''};
   document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Program</h2>
   <div class="form-grid">
-    <div class="field"><label>Nama Program</label><input id="pName" value="${p.name}" placeholder="Contoh: Gerakan Air Bersih"></div>
+    <div class="field"><label>Nama Program</label><input id="pName" value="${esc(p.name)}" placeholder="Contoh: Gerakan Air Bersih"></div>
     <div class="field"><label>Kategori Program</label><input id="pCategory" list="programCategories" value="${esc(p.category)}" placeholder="Ketik atau pilih kategori"><datalist id="programCategories"><option value="Kemanusiaan"><option value="Pendidikan"><option value="Pemberdayaan"><option value="Lingkungan"><option value="Relawan"><option value="Kesehatan"><option value="Keagamaan"></datalist></div>
-    <div class="field"><label>PIC</label><input id="pPic" value="${p.pic}"></div>
+    <div class="field"><label>PIC</label><input id="pPic" value="${esc(p.pic||state.user?.name||'')}"></div>
     <div class="field"><label>Status</label><select id="pStatus"><option ${p.status==='ON TRACK'?'selected':''}>ON TRACK</option><option ${p.status==='AT RISK'?'selected':''}>AT RISK</option><option ${p.status==='DELAYED'?'selected':''}>DELAYED</option></select></div>
-    <div class="field"><label>Progress (%)</label><input id="pProgress" type="number" min="0" max="100" value="${p.progress}"></div>
-    <div class="field"><label>Anggaran (Rp)</label><input id="pBudget" type="number" min="0" value="${p.budget}"></div>
-    <div class="field"><label>Realisasi (Rp)</label><input id="pRealization" type="number" min="0" value="${p.realization}"></div>
-    <div class="field full"><label>Deskripsi</label><textarea id="pDescription" rows="3" placeholder="Ringkasan program">${p.description||''}</textarea></div>
+    <div class="field"><label>Progress (%)</label><input id="pProgress" type="number" min="0" max="100" value="${Number(p.progress)||0}"></div>
+    <div class="field"><label>Anggaran (Rp)</label><input id="pBudget" type="number" min="0" value="${Number(p.budget)||0}"></div>
+    <div class="field"><label>Realisasi (Rp)</label><input id="pRealization" type="number" min="0" value="${Number(p.realization)||0}"></div>
+    <div class="field full"><label>Deskripsi</label><textarea id="pDescription" rows="3" placeholder="Ringkasan program">${esc(p.description||'')}</textarea></div>
   </div>
-  <div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveProgram('${id||''}')">Simpan</button></div>`;
+  <div style="text-align:right;margin-top:10px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button> <button class="btn btn-primary" onclick="saveProgram('${esc(id||'')}')">Simpan</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
 }
-function saveProgram(id){
+async function saveProgram(id){
   const name=document.getElementById('pName').value.trim();
   if(!name){toast('Nama program wajib diisi.');document.getElementById('pName').focus();return}
-  const data={id:id||'PRG-'+String(Date.now()).slice(-6),name,category:document.getElementById('pCategory').value,pic:document.getElementById('pPic').value.trim()||state.user.name,status:document.getElementById('pStatus').value,progress:Math.max(0,Math.min(100,Number(document.getElementById('pProgress').value)||0)),budget:Math.max(0,Number(document.getElementById('pBudget').value)||0),realization:Math.max(0,Number(document.getElementById('pRealization').value)||0),description:document.getElementById('pDescription').value.trim()};
-  if(data.realization>data.budget && data.budget>0){toast('Realisasi tidak boleh melebihi anggaran.');return}
-  const i=state.programs.findIndex(x=>x.id===data.id); if(i>=0) state.programs[i]=data; else state.programs.push(data);
-  save(); closeModal(); toast('Program tersimpan ✅'); showPage('program');
+  const category=document.getElementById('pCategory').value.trim()||'Kemanusiaan';
+  const pic=document.getElementById('pPic').value.trim()||state.user?.name||'Admin Satu Amal';
+  const status=document.getElementById('pStatus').value;
+  const progress=Math.max(0,Math.min(100,Number(document.getElementById('pProgress').value)||0));
+  const budget=Math.max(0,Number(document.getElementById('pBudget').value)||0);
+  const realization=Math.max(0,Number(document.getElementById('pRealization').value)||0);
+  const description=document.getElementById('pDescription').value.trim();
+  if(realization>budget && budget>0){toast('Realisasi tidak boleh melebihi anggaran.');return}
+  try{
+    const user=await getProgramSession();
+    const existing=state.programs.find(x=>x.id===id);
+    const code=existing?.code || existing?.id || id || 'PRG-'+String(Date.now()).slice(-6);
+    const payload={code,name,category,description,budget,realization,progress,status,pic_id:user.id,pic_name:pic,created_by:existing?.createdBy||user.id};
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('programs').update(payload).eq('id',existing.supabaseId).select('id,code,name,category,description,target,budget,realization,progress,status,pic_id,pic_name,created_by,created_at,updated_at').single();
+      remote=result.data; error=result.error;
+    }else{
+      const result=await supabaseClient.from('programs').upsert(payload,{onConflict:'code'}).select('id,code,name,category,description,target,budget,realization,progress,status,pic_id,pic_name,created_by,created_at,updated_at').single();
+      remote=result.data; error=result.error;
+    }
+    if(error) throw error;
+    const mapped=programRemoteRowToState(remote); mapped.pic=pic; mapped.createdBy=remote.created_by||user.id;
+    const idx=state.programs.findIndex(x=>x.id===id);
+    if(idx>=0)state.programs[idx]=mapped;else state.programs.push(mapped);
+    save(); programRemoteReady=true; closeModal(); showPage('program'); toast('Program tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('saveProgram error',err);
+    toast('Gagal menyimpan Program: '+(err?.message||'Unknown error'));
+  }
 }
-function deleteProgram(id){
+async function deleteProgram(id){
   const p=state.programs.find(x=>x.id===id); if(!p)return;
   if(state.tasks.some(t=>t.program===p.name)){toast('Program masih dipakai oleh pekerjaan. Ubah pekerjaan terlebih dahulu.');return}
   if(!confirm(`Hapus program "${p.name}"?`)) return;
-  state.programs=state.programs.filter(x=>x.id!==id); save(); showPage('program'); toast('Program dihapus.');
+  try{
+    if(p.supabaseId){
+      const {error}=await supabaseClient.from('programs').delete().eq('id',p.supabaseId);
+      if(error) throw error;
+    }else if(p.code){
+      const {error}=await supabaseClient.from('programs').delete().eq('code',p.code);
+      if(error) throw error;
+    }
+    state.programs=state.programs.filter(x=>x.id!==id); save(); showPage('program'); toast('Program dihapus dari Supabase.');
+  }catch(err){
+    console.error('deleteProgram error',err);
+    toast('Gagal menghapus Program: '+(err?.message||'Unknown error'));
+  }
 }
 function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function dateId(v){return v||new Date().toISOString().slice(0,10)}
