@@ -3392,6 +3392,13 @@ try{save();}catch(e){}
   // Expose client on window for the live reporting layer.
   window.supabaseClient = supabaseClient;
 
+  // Shared helper used by Reporting/AI save actions.
+  async function getSupabaseSession(){
+    const { data, error } = await supabaseClient.auth.getSession();
+    if(error) throw error;
+    return data?.session || null;
+  }
+
   function openRecoveryModal(){
     const modal=document.getElementById('recoveryModalV6');
     if(modal) modal.classList.remove('hidden');
