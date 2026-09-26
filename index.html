@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Satu Amal Operating System</title>
+<title>Satu Amal Operating System — V34</title>
 <style>
 :root{
   --brand-cyan:#43c7e8;
@@ -1441,6 +1441,30 @@ body{
 .recovery-card-v6{width:min(460px,100%);background:#fff;border:1px solid #e5ebef;border-radius:22px;padding:26px;box-shadow:0 25px 70px rgba(10,49,69,.18)}
 .recovery-card-v6 h2{margin:0;color:#17283a;font-size:22px}.recovery-card-v6 p{margin:7px 0 18px;color:#6b7b89;font-size:13px;line-height:1.55}
 .recovery-actions-v6{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+</style>
+
+<style>
+/* ===== PARTNERSHIP V34 UI REPAIR ===== */
+.part-v32-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;overflow-x:auto;padding:2px 1px 3px;scrollbar-width:thin}
+.part-v32-tab{border:1px solid #dbe6ee;background:#fff;color:#173f61;border-radius:10px;padding:9px 13px;font-size:12px;font-weight:800;white-space:nowrap;cursor:pointer;transition:.18s ease}
+.part-v32-tab:hover{transform:translateY(-1px);border-color:#9bc7df}
+.part-v32-tab.active{background:linear-gradient(135deg,#0d3153,#1b6d86);color:#fff;border-color:transparent;box-shadow:0 4px 12px rgba(13,49,83,.12)}
+.part-v32-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.part-v32-kpi{padding:12px 13px;border:1px solid #e3ebf0;border-radius:12px;background:linear-gradient(180deg,#fff,#f8fbfd);min-width:0}
+.part-v32-kpi small{display:block;color:#71869a;font-size:10px;font-weight:700}
+.part-v32-kpi strong{display:block;color:#173f61;font-size:19px;margin-top:5px;line-height:1.2;overflow-wrap:anywhere}
+.part-v32-subtle{font-size:10px;color:#74899a;line-height:1.45}
+.part-v32-funnel{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.part-v32-funnel .step{padding:10px;border:1px solid #e6edf2;border-radius:10px;background:#fbfdfe;color:#61778a;font-size:10px;font-weight:700}
+.part-v32-funnel .step b{display:block;color:#173f61;font-size:16px;margin-top:4px}
+.part-v32-table-wrap{overflow:auto;margin-top:12px}
+.part-v32-table{width:100%;min-width:900px;border-collapse:collapse}
+.part-v32-table th,.part-v32-table td{padding:10px 9px;border-bottom:1px solid #edf2f5;text-align:left;vertical-align:top;font-size:12px}
+.part-v32-table th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#70869a;background:#f8fafb}
+.part-v32-empty{padding:26px 16px;text-align:center;color:#8798a5;font-size:12px}
+@media(max-width:1000px){.part-v32-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.part-v32-funnel{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.part-v32-tabs{flex-wrap:nowrap}.part-v32-tab{flex:0 0 auto}.part-v32-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.part-v32-funnel{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.part-v32-grid,.part-v32-funnel{grid-template-columns:1fr}.part-v32-kpi strong{font-size:18px}}
 </style>
 </head>
 <body>
@@ -6428,7 +6452,7 @@ window.crmV2OpenTab=crmV2OpenTab;
     const [p,a,f,pr,pl,t,real]=await Promise.all([
       supabaseClient.from('partnerships').select('id,code,partner_name,institution_origin,partner_type,stage,potential_value,realized_value,next_action,next_action_date,program_id,program_plan_id,pic_id,pic_name,status,program_name,notes,contact_name,contact_phone,contact_email,city,business_field,prospect_source,estimated_close_date,closing_confirmed,closing_date,supporting_docs_url,created_at,updated_at').order('created_at',{ascending:false}),
       supabaseClient.from('partnership_activities').select('id,partnership_id,custom_institution_name,activity_date,activity_type,pic_id,status,result,next_action,follow_up_date,notes,created_at').order('activity_date',{ascending:false}),
-      supabaseClient.from('partnership_proposal_files').select('id,partnership_id,custom_institution_name,program_id,program_plan_id,file_name,file_path,mime_type,file_size,notes,uploaded_by,created_at').order('created_at',{ascending:false}),
+      supabaseClient.from('partnership_proposal_files').select('id,partnership_id,custom_institution_name,program_id,custom_program_name,program_plan_id,custom_plan_name,file_name,file_path,mime_type,file_size,notes,uploaded_by,created_at').order('created_at',{ascending:false}),
       supabaseClient.from('programs').select('id,name,code,status').order('name'),
       supabaseClient.from('program_plans').select('id,code,program_id,activity_name,activity_date,location,status,pic_id,beneficiary_target').order('activity_date',{ascending:false,nullsLast:true}),
       supabaseClient.from('v_partnership_monthly_targets').select('target_month,partnership_target_amount,status').eq('target_month',currentMonthV()).maybeSingle(),
@@ -6516,7 +6540,7 @@ window.crmV2OpenTab=crmV2OpenTab;
       ${data.proposalFiles.map(x=>`<tr>
         <td><strong>${escV(x.file_name)}</strong><br><small>${escV(x.mime_type||'file')}</small></td>
         <td>${escV(x.custom_institution_name||partnerName(x.partnership_id)||'-')}</td>
-        <td>${escV(programName(x.program_id)||planName(x.program_plan_id)||'-')}</td>
+        <td>${escV(x.custom_program_name||programName(x.program_id)||'-')}<br><small>Plan: ${escV(x.custom_plan_name||planName(x.program_plan_id)||'-')}</small></td>
         <td>${escV(new Date(x.created_at).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}))}</td>
         <td>${fmtBytesV(x.file_size)}</td>
         <td><button class="btn btn-secondary btn-small" onclick="window.partnershipV33OpenFile('${x.id}')">Buka</button> <button class="btn btn-danger btn-small" onclick="window.partnershipV33DeleteFile('${x.id}')">Hapus</button></td>
@@ -6681,11 +6705,13 @@ window.crmV2OpenTab=crmV2OpenTab;
     modalV(`<h2>Simpan File Proposal</h2><div class="form-grid">
       <div class="field"><label>Nama Instansi dari Bank Prospek</label><select id="prPartner"><option value="">- Pilih instansi -</option>${data.partners.map(x=>`<option value="${x.id}">${escV(x.partner_name)}</option>`).join('')}</select></div>
       <div class="field"><label>Nama Instansi Custom (opsional)</label><input id="prCustomInstitution" placeholder="Ketik nama instansi bila belum ada di Bank Prospek"></div>
-      <div class="field"><label>Program</label><select id="prProgram"><option value="">- Pilih Program -</option>${data.programs.map(p=>`<option value="${p.id}">${escV(p.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Plan Program</label><select id="prPlan"><option value="">- Pilih Plan -</option>${data.plans.map(p=>`<option value="${p.id}">${fmtDateV(p.activity_date)} — ${escV(p.activity_name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Program dari Master</label><select id="prProgram"><option value="">- Pilih Program -</option>${data.programs.map(p=>`<option value="${p.id}">${escV(p.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Program Custom (opsional)</label><input id="prCustomProgram" placeholder="Ketik nama program jika belum ada di Master"></div>
+      <div class="field"><label>Plan Program dari Master</label><select id="prPlan"><option value="">- Pilih Plan -</option>${data.plans.map(p=>`<option value="${p.id}">${fmtDateV(p.activity_date)} — ${escV(p.activity_name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Plan Program Custom (opsional)</label><input id="prCustomPlan" placeholder="Ketik nama plan/kegiatan jika belum ada di Plan Program"></div>
       <div class="field full"><label>File Proposal</label><input id="prFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip"></div>
       <div class="field full"><label>Catatan</label><textarea id="prNotes" rows="3" placeholder="Opsional"></textarea></div>
-    </div><div class="part-v32-subtle" style="margin-top:8px">Proposal di sini hanya sebagai bank file. Tidak ada field nilai, status, atau tracking proposal.</div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="window.partnershipV33SaveProposal()">Simpan File</button></div>`);
+    </div><div class="part-v32-subtle" style="margin-top:8px">Proposal di sini hanya sebagai bank file. Program dan Plan Program dapat dipilih dari master atau diisi secara custom.</div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="window.partnershipV33SaveProposal()">Simpan File</button></div>`);
   };
 
   window.partnershipV33SaveProposal=async()=>{
@@ -6698,7 +6724,9 @@ window.crmV2OpenTab=crmV2OpenTab;
     try{
       const user=(await supabaseClient.auth.getUser()).data.user;
       const programId=document.getElementById('prProgram').value||null;
+      const customProgramName=document.getElementById('prCustomProgram').value.trim()||null;
       const planId=document.getElementById('prPlan').value||null;
+      const customPlanName=document.getElementById('prCustomPlan').value.trim()||null;
       const notes=document.getElementById('prNotes').value.trim()||null;
       const uploaded=[];
       for(const file of files){
@@ -6710,7 +6738,9 @@ window.crmV2OpenTab=crmV2OpenTab;
           partnership_id:partnershipId,
           custom_institution_name:customInstitution,
           program_id:programId,
+          custom_program_name:customProgramName,
           program_plan_id:planId,
+          custom_plan_name:customPlanName,
           file_name:file.name,
           file_path:path,
           mime_type:file.type||null,
