@@ -4756,49 +4756,80 @@ let geminiAIBusy = false;
 function buildGeminiContext(data, month, programId){
   const base = buildLiveAnalysis(data, month, programId);
   const programName = programId ? (data.programs.find(x=>x.id===programId)?.name || programId) : 'Semua Program';
+  const toNum=v=>Number.isFinite(Number(v))?Number(v):0;
   const segmentCounts = data.donors.reduce((acc,x)=>{ const k=String(x.segment||'Tidak diisi'); acc[k]=(acc[k]||0)+1; return acc; },{});
-  const channelTotals = data.fundraising.reduce((acc,x)=>{ const k=String(x.channel||'Lainnya'); acc[k]=(acc[k]||0)+Number(x.amount||0); return acc; },{});
+  const channelTotals = data.fundraising.reduce((acc,x)=>{ const k=String(x.channel||'Lainnya'); acc[k]=(acc[k]||0)+toNum(x.amount); return acc; },{});
   const overdueTasks = data.tasks.filter(x=>x.deadline && String(x.deadline)<new Date().toISOString().slice(0,10) && !['COMPLETED','SELESAI','DONE'].includes(normalizeLiveStatus(x.status))).length;
-  const activePrograms = data.programs.filter(x=>['ACTIVE','AKTIF','ON TRACK','ONGOING'].includes(normalizeLiveStatus(x.status))).length;
-  const totalBudget = data.programs.reduce((a,x)=>a+Number(x.budget||0),0);
-  const totalRealization = data.programs.reduce((a,x)=>a+Number(x.realization||0),0);
+
+  // IMPORTANT: kirim angka yang sama persis dengan yang ditampilkan pada kartu/tabel Live Supabase.
+  const kpi = {
+    fundraising_total: toNum(base.fundraisingTotal),
+    fundraising_transactions: data.fundraising.length,
+    cash_in: toNum(base.cashIn),
+    cash_out: toNum(base.cashOut),
+    net_cash_flow: toNum(base.cashIn)-toNum(base.cashOut),
+    active_programs: data.programs.filter(x=>['ACTIVE','AKTIF','ON TRACK','ONGOING'].includes(normalizeLiveStatus(x.status))).length,
+    total_programs: data.programs.length,
+    published_content: base.published,
+    total_reach: toNum(base.reach),
+    donors: data.donors.length,
+    donor_total_recorded: toNum(base.donorTotal),
+    follow_up_items: base.followUp,
+    active_partnerships: base.partnerActive,
+    partnership_pipeline: toNum(base.pipeline),
+    documentation_files: toNum(base.docsFiles),
+    documentation_records: data.documents.length,
+    tasks_total: data.tasks.length,
+    tasks_completed: base.taskDone,
+    task_progress_avg: base.taskProgress,
+    tasks_overdue: overdueTasks,
+    attendance_records: data.attendance.length,
+    attendance_complete: base.attComplete,
+    attendance_rate: base.attRate,
+    administration_records: data.administration.length,
+    administration_overdue: base.adminOverdue
+  };
+
   return {
     periode: month || 'Semua periode',
     program: programName,
-    instruction: 'Analisis data organisasi secara faktual. Jangan mengarang angka. Bedakan temuan berbasis data dengan interpretasi. Gunakan bahasa Indonesia yang ringkas dan operasional.',
-    kpi: {
-      fundraising_total: base.fundraisingTotal,
-      fundraising_transactions: data.fundraising.length,
-      cash_in: base.cashIn,
-      cash_out: base.cashOut,
-      net_cash_flow: base.cashIn-base.cashOut,
-      active_programs: activePrograms,
-      total_programs: base.programCount,
-      program_budget_total: totalBudget,
-      program_realization_total: totalRealization,
-      published_content: base.published,
-      total_reach: base.reach,
-      donors: data.donors.length,
-      donor_total_recorded: base.donorTotal,
-      follow_up_items: base.followUp,
-      active_partnerships: base.partnerActive,
-      partnership_pipeline: base.pipeline,
-      documentation_files: base.docsFiles,
-      tasks_total: data.tasks.length,
-      tasks_completed: base.taskDone,
-      task_progress_avg: base.taskProgress,
-      tasks_overdue: overdueTasks,
-      attendance_records: data.attendance.length,
-      attendance_complete: base.attComplete,
-      attendance_rate: base.attRate,
-      administration_records: data.administration.length,
-      administration_overdue: base.adminOverdue
+    instruction: 'Analisis data organisasi secara faktual. Gunakan angka yang diberikan. Jangan mengarang. Angka 0 adalah nilai nyata. Bila hanya sedikit data, tetap analisis data yang tersedia dan jelaskan keterbatasannya.',
+    kpi,
+    // alias sederhana agar kompatibel dengan payload test yang sudah terbukti berhasil
+    summary_metrics: {
+      fundraising: kpi.fundraising_total,
+      fundraising_transactions: kpi.fundraising_transactions,
+      cash_in: kpi.cash_in,
+      cash_out: kpi.cash_out,
+      programs: kpi.total_programs,
+      tasks_total: kpi.tasks_total,
+      tasks_done: kpi.tasks_completed,
+      partners_active: kpi.active_partnerships,
+      content_published: kpi.published_content,
+      content_reach: kpi.total_reach,
+      donors_total: kpi.donors,
+      donor_follow_up: kpi.follow_up_items,
+      donor_total_donation: kpi.donor_total_recorded,
+      documentation_files: kpi.documentation_files
+    },
+    visible_dashboard_metrics: {
+      fundraising: `Rp${toNum(kpi.fundraising_total).toLocaleString('id-ID')}`,
+      cash_flow_net: `Rp${toNum(kpi.net_cash_flow).toLocaleString('id-ID')}`,
+      programs: kpi.total_programs,
+      tasks_done: kpi.tasks_completed,
+      partners_active: kpi.active_partnerships,
+      content_published: kpi.published_content,
+      donor_total: kpi.donor_total_recorded
     },
     fundraising_by_channel: channelTotals,
     donor_segments: segmentCounts,
     existing_rule_based_findings: base.observations,
     existing_risks: base.risks,
-    existing_actions: base.actions
+    existing_actions: base.actions,
+    data_quality: {
+      month, programId: programId||null,
+      counts: {fundraising:data.fundraising.length,cash_flows:data.cashFlows.length,programs:data.programs.length,contents:data.contents.length,donors:data.donors.length,partnerships:data.partnerships.length,documents:data.documents.length,tasks:data.tasks.length,attendance:data.attendance.length,administration:data.administration.length}
+    }
   };
 }
 
@@ -4876,7 +4907,7 @@ async function runGeminiAIReport(){
     const programId=localStorage.getItem('sa_report_program_live')||'';
     const context=buildGeminiContext(liveReportingData,month,programId);
     if(button){button.disabled=true;button.textContent='⏳ Menganalisis...';}
-    if(status)status.textContent='Mengirim ringkasan data ke Gemini...';
+    if(status)status.textContent=`Mengirim ${context.kpi.fundraising_transactions} transaksi fundraising, ${context.kpi.cash_flows||context.data_quality.counts.cash_flows} transaksi keuangan, ${context.kpi.total_programs} program, dan ${context.kpi.donors} donor ke Gemini...`;
     const result=await supabaseClient.functions.invoke('ai-report',{body:{context}});
     if(result.error) throw result.error;
     if(!result.data?.ok) throw new Error(result.data?.error||'AI tidak mengembalikan hasil.');
