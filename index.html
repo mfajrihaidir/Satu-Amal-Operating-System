@@ -5252,5 +5252,275 @@ showPage = function(page){
   }
 };
 </script>
+
+<style>
+/* =========================================================
+   STAGE 2 FINAL — V25 PERMISSION-AWARE FRONTEND
+   - Sidebar mengikuti get_my_module_permissions()
+   - Route guard mengikuti permission database
+   - Tombol tambah/edit/hapus mengikuti CRUD permission
+   - Profil tim tampil read-only
+   ========================================================= */
+.permission-hidden{display:none!important}
+.permission-readonly{opacity:.72;pointer-events:none}
+.profile-locked-card{display:grid;gap:10px}
+.profile-locked-row{display:grid;grid-template-columns:140px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #edf1f5}
+.profile-locked-row:last-child{border-bottom:0}
+.profile-lock-label{font-size:11px;color:#71869a;font-weight:700}
+.profile-lock-value{font-size:13px;font-weight:700;color:#173f61}
+</style>
+<script>
+/* ================= V25 — PERMISSION-AWARE FRONTEND ================= */
+const V25_MODULE_KEYS = {
+  fundraising:'fundraising',
+  program:'program',
+  content:'content',
+  crm:'crm',
+  partnership:'partnership',
+  docs:'documentation',
+  reporting:'reporting',
+  administration:'administration',
+  finance:'finance'
+};
+
+const v25Permissions = {
+  ready:false,
+  loading:false,
+  map:{},
+  error:''
+};
+
+function v25Can(pageOrModule, action='view'){
+  const key=V25_MODULE_KEYS[pageOrModule]||pageOrModule;
+  if(['dashboard','work','attendance','settings'].includes(key)) return true;
+  const p=v25Permissions.map[key];
+  if(!p) return false;
+  return !!p['can_'+action];
+}
+
+function v25BuildPermissionMap(rows){
+  const map={};
+  (rows||[]).forEach(r=>{
+    if(!r?.module_key) return;
+    map[r.module_key]={
+      can_view:!!r.can_view,
+      can_create:!!r.can_create,
+      can_update:!!r.can_update,
+      can_delete:!!r.can_delete
+    };
+  });
+  return map;
+}
+
+async function v25SyncIdentityAndPermissions(){
+  if(!window.supabaseClient || !supabaseClient.auth) return false;
+  if(v25Permissions.loading) return false;
+  v25Permissions.loading=true;
+  v25Permissions.error='';
+  try{
+    const [{data:profile,error:profileError},{data:permissions,error:permissionsError}]=await Promise.all([
+      supabaseClient.rpc('get_my_profile'),
+      supabaseClient.rpc('get_my_module_permissions')
+    ]);
+    if(profileError) throw profileError;
+    if(permissionsError) throw permissionsError;
+
+    const p=Array.isArray(profile)?profile[0]:profile;
+    if(p?.id){
+      state.user={
+        ...(state.user||{}),
+        id:p.id,
+        name:p.full_name||state.user?.name||'Pengguna',
+        division:p.division||state.user?.division||'',
+        role:p.role||state.user?.role||'Staff',
+        jobTitle:p.job_title||'',
+        photoUrl:p.avatar_url||state.user?.photoUrl||'',
+        email:state.user?.email||''
+      };
+      save();
+    }
+
+    v25Permissions.map=v25BuildPermissionMap(permissions||[]);
+    v25Permissions.ready=true;
+    applyV25PermissionUI();
+    return true;
+  }catch(err){
+    console.error('V25 permission sync error:',err);
+    v25Permissions.error=err?.message||'Permission gagal dimuat.';
+    v25Permissions.ready=false;
+    return false;
+  }finally{
+    v25Permissions.loading=false;
+  }
+}
+
+function v25PageButtonMap(){
+  return {
+    fundraising:'fundraising',
+    program:'program',
+    content:'content',
+    crm:'crm',
+    partnership:'partnership',
+    docs:'documentation',
+    reporting:'reporting',
+    administration:'administration',
+    finance:'finance'
+  };
+}
+
+function applyV25PermissionUI(){
+  if(!v25Permissions.ready) return;
+  const navMap=v25PageButtonMap();
+  document.querySelectorAll('#sidebar [data-page]').forEach(btn=>{
+    const page=btn.dataset.page;
+    const module=navMap[page];
+    const allowed=!module || v25Can(module,'view');
+    btn.classList.toggle('permission-hidden',!allowed);
+  });
+
+  /* Hide dashboard shortcuts/cards that lead to restricted modules. */
+  Object.entries(navMap).forEach(([page,module])=>{
+    const allowed=v25Can(module,'view');
+    document.querySelectorAll(`[onclick*="showPage('${page}')"]`).forEach(el=>{
+      if(el.closest('#sidebar')) return;
+      el.classList.toggle('permission-hidden',!allowed);
+      if(!allowed) el.setAttribute('aria-hidden','true');
+    });
+  });
+
+  v25ApplyCrudLocks();
+}
+
+function v25ApplyCrudLocks(){
+  if(!v25Permissions.ready) return;
+
+  const currentTitle=(document.getElementById('topTitle')?.textContent||'').toLowerCase();
+  let module=null;
+  if(currentTitle.includes('penggalangan dana')) module='fundraising';
+  else if(currentTitle==='program') module='program';
+  else if(currentTitle.includes('konten')) module='content';
+  else if(currentTitle.includes('crm')) module='crm';
+  else if(currentTitle.includes('kemitraan')) module='partnership';
+  else if(currentTitle.includes('dokumentasi')) module='documentation';
+  else if(currentTitle.includes('administrasi')) module='administration';
+  else if(currentTitle.includes('keuangan')) module='finance';
+  else if(currentTitle.includes('pelaporan')) module='reporting';
+
+  if(!module) return;
+  const canCreate=v25Can(module,'create');
+  const canUpdate=v25Can(module,'update');
+  const canDelete=v25Can(module,'delete');
+
+  document.querySelectorAll('#content button').forEach(btn=>{
+    const text=(btn.textContent||'').trim().replace(/\s+/g,' ');
+    const onclick=btn.getAttribute('onclick')||'';
+    const isCreate=/^\+|Tambah|Upload|Buat/i.test(text) || /^open[A-Za-z]+\(\s*\)/.test(onclick);
+    const isEdit=/^Edit$|Perbarui|Edit /i.test(text);
+    const isDelete=/Hapus/i.test(text);
+    if(isCreate && !canCreate) btn.classList.add('permission-hidden');
+    if(isEdit && !canUpdate) btn.classList.add('permission-hidden');
+    if(isDelete && !canDelete) btn.classList.add('permission-hidden');
+  });
+}
+
+function v25GuardedShowPage(page){
+  const module=V25_MODULE_KEYS[page];
+  if(module && page!=='settings'){
+    if(!v25Permissions.ready){
+      toast('Memuat hak akses akun...');
+      v25SyncIdentityAndPermissions().then(()=>{
+        if(v25Permissions.ready && v25Can(module,'view')) v25GuardedShowPage(page);
+        else if(v25Permissions.ready) toast('Akses modul ini tidak tersedia untuk akun kamu.');
+      });
+      return;
+    }
+    if(!v25Can(module,'view')){
+      toast('Akses modul ini tidak tersedia untuk akun kamu.');
+      return;
+    }
+  }
+  _showPageV25Base(page);
+  setTimeout(()=>applyV25PermissionUI(),0);
+}
+
+/* Preserve the already-built V24 route chain, then put V25 guard on top. */
+const _showPageV25Base=showPage;
+showPage=v25GuardedShowPage;
+window.showPage=showPage;
+
+/* Read-only team profile. Official identity changes are database/admin controlled. */
+function v25RenderLockedProfile(){
+  const u=state.user||{};
+  const status='AKTIF';
+  document.getElementById('modalBox').innerHTML=`
+    <div class="page-head" style="margin-bottom:8px">
+      <div>
+        <h1 style="font-size:20px">Profil Akun</h1>
+        <p>Identitas organisasi ditetapkan oleh sistem dan tidak dapat diubah dari sini.</p>
+      </div>
+      <span class="badge b-green">AKUN ${status}</span>
+    </div>
+    <div class="card profile-locked-card" style="padding:14px">
+      <div class="profile-locked-row"><div class="profile-lock-label">NAMA LENGKAP</div><div class="profile-lock-value">${escapeHtml(u.name||'-')}</div></div>
+      <div class="profile-locked-row"><div class="profile-lock-label">JABATAN</div><div class="profile-lock-value">${escapeHtml(u.jobTitle||'-')}</div></div>
+      <div class="profile-locked-row"><div class="profile-lock-label">DIVISI</div><div class="profile-lock-value">${escapeHtml(u.division||'-')}</div></div>
+      <div class="profile-locked-row"><div class="profile-lock-label">ROLE SISTEM</div><div class="profile-lock-value">${escapeHtml(u.role||'-')}</div></div>
+      <div class="profile-locked-row"><div class="profile-lock-label">EMAIL</div><div class="profile-lock-value">${escapeHtml(u.email||'-')}</div></div>
+    </div>
+    <div class="profile-form-note">Perubahan nama, jabatan, divisi, role, dan status dilakukan melalui pengelolaan akun oleh Admin Sistem.</div>
+    <div style="text-align:right;margin-top:12px"><button class="btn btn-primary" onclick="closeModal()">Tutup</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+window.openProfileModal=v25RenderLockedProfile;
+openProfileModal=v25RenderLockedProfile;
+
+function v25LockedSaveProfile(){
+  toast('Profil akun ditetapkan oleh sistem. Hubungi Admin Sistem untuk perubahan.');
+}
+window.saveProfile=v25LockedSaveProfile;
+saveProfile=v25LockedSaveProfile;
+
+function v25SettingsPage(){
+  const u=state.user||{};
+  return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Identitas akun dan hak akses yang ditetapkan oleh sistem.</p></div><button class="btn btn-secondary" onclick="openProfileModal()">Lihat Profil</button></div>
+  <div class="card"><table class="table"><thead><tr><th>Nama</th><th>Jabatan</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody>
+  <tr><td>${esc(u.name||'-')}</td><td>${esc(u.jobTitle||'-')}</td><td>${esc(u.division||'-')}</td><td>${esc(u.role||'-')}</td><td><span class="badge b-green">AKTIF</span></td></tr>
+  </tbody></table></div>`;
+}
+window.settingsPage=v25SettingsPage;
+settingsPage=v25SettingsPage;
+
+/* Re-sync identity + permissions on fresh/returning sessions. */
+setTimeout(()=>{
+  if(state.user && window.supabaseClient?.auth){
+    v25SyncIdentityAndPermissions().then(()=>{
+      if(state.checkedIn && document.getElementById('app') && !document.getElementById('app').classList.contains('hidden')){
+        applyV25PermissionUI();
+      }
+    });
+  }
+},180);
+
+supabaseClient.auth.onAuthStateChange((event)=>{
+  if(event==='SIGNED_IN' || event==='TOKEN_REFRESHED'){
+    setTimeout(()=>v25SyncIdentityAndPermissions(),0);
+  }
+  if(event==='SIGNED_OUT'){
+    v25Permissions.ready=false;
+    v25Permissions.map={};
+  }
+});
+
+/* Re-apply CRUD locks after modal/page rerenders without touching existing module code. */
+document.addEventListener('click',()=>setTimeout(()=>{
+  try{applyV25PermissionUI()}catch(e){}
+},20));
+
+/* Final safety: direct permission guard for known restricted routes. */
+window.v25Can=v25Can;
+window.v25SyncIdentityAndPermissions=v25SyncIdentityAndPermissions;
+</script>
+
 </body>
 </html>
