@@ -3389,6 +3389,8 @@ try{save();}catch(e){}
     SUPABASE_URL,
     SUPABASE_PUBLISHABLE_KEY
   );
+  // Expose client on window for the live reporting layer.
+  window.supabaseClient = supabaseClient;
 
   function openRecoveryModal(){
     const modal=document.getElementById('recoveryModalV6');
@@ -4511,7 +4513,7 @@ function liveMonthRange(month){
 }
 
 async function liveQuery(table, columns, month, dateColumn, programId){
-  if(!window.supabase || !window.supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  if(!window.supabase || typeof supabaseClient==='undefined' || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
   let q = supabaseClient.from(table).select(columns);
   const range = liveMonthRange(month);
   if(range.start && dateColumn) q=q.gte(dateColumn,range.start).lte(dateColumn,range.end);
