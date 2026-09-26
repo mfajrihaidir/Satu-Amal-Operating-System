@@ -6121,5 +6121,268 @@ showPage=function(page){
 window.showPage=showPage;
 setTimeout(()=>{if(document.getElementById('topTitle')?.textContent==='Penggalangan Dana')frV2Enter()},1200);
 </script>
+
+
+<!-- =========================================================
+     CRM V2.1 — CENTER OF DONOR RELATIONSHIP MANAGEMENT
+     Additive override on top of the existing application.
+     ========================================================= -->
+<style>
+.crm-v2-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.crm-v2-tab{border:1px solid var(--border,#dbe5ea);background:#fff;color:#26435a;padding:9px 12px;border-radius:10px;font-weight:800;font-size:12px;cursor:pointer}
+.crm-v2-tab.active{background:linear-gradient(135deg,#0d3153,#1b6d86);color:#fff;border-color:transparent}
+.crm-v2-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.crm-v2-card{background:#fff;border:1px solid #e4ebef;border-radius:14px;padding:16px;box-shadow:0 8px 22px rgba(13,49,83,.05)}
+.crm-v2-table-wrap{overflow:auto}
+.crm-v2-table{width:100%;border-collapse:collapse;min-width:940px}
+.crm-v2-table th,.crm-v2-table td{padding:10px 9px;border-bottom:1px solid #edf1f3;text-align:left;vertical-align:top;font-size:12px}
+.crm-v2-table th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6a7782;background:#f8fafb}
+.crm-v2-muted{font-size:11px;color:var(--muted,#71808c)}
+.crm-v2-toolbar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px}
+.crm-v2-progress{height:8px;background:#edf2f4;border-radius:99px;overflow:hidden}
+.crm-v2-progress>span{display:block;height:100%;background:linear-gradient(90deg,#0d3153,#25b995);border-radius:99px}
+.crm-v2-detail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+.crm-v2-mini{background:#f8fbfc;border:1px solid #e7eef1;border-radius:10px;padding:10px}
+.crm-v2-mini small{display:block;color:#71808c;font-size:10px}
+.crm-v2-mini strong{display:block;margin-top:4px;font-size:16px;color:#0d3153}
+.crm-v2-empty{padding:22px;text-align:center;color:#7b8790}
+@media (max-width:900px){.crm-v2-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.crm-v2-detail{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (max-width:560px){.crm-v2-grid{grid-template-columns:1fr}.crm-v2-detail{grid-template-columns:1fr}.crm-v2-tab{flex:1 1 calc(50% - 8px);text-align:center}.crm-v2-toolbar>*{width:100%}}
+</style>
+<script>
+const crmV2State={tab:'dashboard',month:new Date().toISOString().slice(0,7),donorId:'',followups:[],history:[],ready:false,loading:false};
+
+function crmV2FmtDate(v){return v?new Date(v+'T00:00:00').toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}):'-'}
+function crmV2Pct(v){return `${Number(v||0).toLocaleString('id-ID',{maximumFractionDigits:1})}%`}
+function crmV2MonthStart(v){return `${String(v||crmV2State.month).slice(0,7)}-01`}
+function crmV2Donor(id){return (state.crm||[]).find(x=>(x.supabaseId||x.id)===id)||null}
+function crmV2Tabs(){
+  return `<div class="crm-v2-tabs">
+    ${[['dashboard','Dashboard'],['database','Database Donatur'],['target','Target CRM'],['daily','Update Donasi Harian'],['followup','Follow Up'],['history','Riwayat Donasi'],['reports','Laporan']].map(([k,t])=>`<button class="crm-v2-tab ${crmV2State.tab===k?'active':''}" onclick="crmV2OpenTab('${k}')">${t}</button>`).join('')}
+  </div>`;
+}
+function crmV2Root(inner){return `<div class="module-page"><div class="page-head"><div><h1>CRM / Donor</h1><p>Pusat database donor, hubungan, target CRM, donasi harian, follow-up, riwayat dan laporan.</p></div></div>${crmV2Tabs()}${inner}</div>`}
+
+async function crmV2Load(){
+  if(crmV2State.loading)return;
+  crmV2State.loading=true;
+  try{
+    await syncCRMFromSupabase();
+    const {data:fu,error:fuErr}=await supabaseClient.from('donor_followups').select('id,donor_id,follow_up_date,pic_id,status,communication_channel,result,notes,next_follow_up_date,created_at,updated_at').order('follow_up_date',{ascending:true,nullsLast:true});
+    if(fuErr)throw fuErr;
+    crmV2State.followups=fu||[];
+    crmV2State.ready=true;
+  }catch(err){console.error('CRM V2 load',err);toast('CRM V2 gagal dimuat: '+(err?.message||'Unknown error'))}
+  finally{crmV2State.loading=false;crmV2Render()}
+}
+
+function crmV2Dashboard(){
+  const donors=state.crm||[];
+  const totalDonors=donors.length;
+  const totalDonation=donors.reduce((a,d)=>a+Number(d.totalDonation||0),0);
+  const newD=donors.filter(d=>d.segment==='Donatur Baru').length;
+  const repeat=donors.filter(d=>d.segment==='Donatur Berulang').length;
+  const istiq=donors.filter(d=>d.segment==='Donatur Istiqomah').length;
+  const pending=crmPending();
+  const followups=crmV2State.followups.filter(f=>['TERJADWAL','OPEN','PERLU TINDAK LANJUT'].includes(String(f.status||'').toUpperCase())).length;
+  const selected=crmV2Donor(crmV2State.donorId);
+  return crmV2Root(`
+    <div class="crm-v2-grid">
+      ${kpiPlain('Total Donatur',String(totalDonors),'Database aktif')}
+      ${kpiPlain('Total Donasi',rupiah(totalDonation),'Turunan transaksi sukses')}
+      ${kpiPlain('Donatur Baru',String(newD),'Segmentasi saat ini')}
+      ${kpiPlain('Donatur Berulang',String(repeat),'Segmentasi saat ini')}
+    </div>
+    <div class="crm-v2-detail">
+      <div class="crm-v2-mini"><small>Donatur Istiqomah</small><strong>${istiq}</strong></div>
+      <div class="crm-v2-mini"><small>Follow-up Donor</small><strong>${Math.max(pending,followups)}</strong></div>
+      <div class="crm-v2-mini"><small>Donor Aktif</small><strong>${donors.filter(d=>d.status==='AKTIF').length}</strong></div>
+      <div class="crm-v2-mini"><small>Perlu Data</small><strong>${donors.filter(d=>d.status==='PERLU DATA').length}</strong></div>
+    </div>
+    <div class="crm-v2-card" style="margin-top:14px">
+      <div class="section-title">Aksi CRM</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-primary" onclick="crmV2OpenTab('database');crmV2OpenDonorForm()">+ Tambah Donatur</button>
+        <button class="btn btn-secondary" onclick="crmV2OpenTab('daily');crmV2OpenDailyForm()">+ Update Donasi Hari Ini</button>
+        <button class="btn btn-secondary" onclick="crmV2OpenTab('target')">Lihat Target CRM</button>
+        <button class="btn btn-secondary" onclick="crmV2OpenTab('followup')">Kelola Follow Up</button>
+      </div>
+    </div>
+    <div class="crm-v2-card" style="margin-top:14px">
+      <div class="section-title">Profil Donatur Cepat</div>
+      <div class="field" style="margin-top:10px"><label>Pilih Donatur</label><select onchange="crmV2State.donorId=this.value;crmV2State.tab='dashboard';crmV2Render()"><option value="">Pilih donor</option>${donors.map(d=>`<option value="${esc(d.supabaseId||d.id)}" ${crmV2State.donorId===(d.supabaseId||d.id)?'selected':''}>${esc(d.name)}${d.phone?' · '+esc(d.phone):''}</option>`).join('')}</select></div>
+      ${selected?`<div class="crm-v2-detail"><div class="crm-v2-mini"><small>Total Donasi</small><strong>${rupiah(selected.totalDonation)}</strong></div><div class="crm-v2-mini"><small>Jumlah Transaksi</small><strong>${selected.transactionCount||0}</strong></div><div class="crm-v2-mini"><small>Donasi Pertama</small><strong>${crmV2FmtDate(selected.firstDonation)}</strong></div><div class="crm-v2-mini"><small>Donasi Terakhir</small><strong>${crmV2FmtDate(selected.lastDonation)}</strong></div></div><div style="margin-top:10px"><button class="btn btn-secondary btn-small" onclick="crmV2OpenDonorDetail('${esc(selected.supabaseId||selected.id)}')">Buka Profil Donatur →</button></div>`:'<div class="crm-v2-empty">Pilih donor untuk melihat ringkasan.</div>'}
+    </div>
+  `);
+}
+
+function crmV2Database(){
+  const q=(document.getElementById('crmV2Search')?.value||'').toLowerCase();
+  const seg=(document.getElementById('crmV2Seg')?.value||'');
+  const rows=(state.crm||[]).filter(d=>(!q||[d.name,d.phone,d.email,d.city,d.pic,d.segment,d.status].join(' ').toLowerCase().includes(q))&&(!seg||d.segment===seg));
+  return crmV2Root(`
+    <div class="crm-v2-toolbar"><div class="field" style="flex:1"><label>Cari</label><input id="crmV2Search" value="${esc(q)}" placeholder="Nama, WhatsApp, email, kota, PIC..." oninput="crmV2Render()"></div><div class="field"><label>Segmen</label><select id="crmV2Seg" onchange="crmV2Render()"><option value="">Semua</option>${['Donatur Baru','Donatur Berulang','Donatur Istiqomah'].map(v=>`<option value="${v}" ${seg===v?'selected':''}>${v}</option>`).join('')}</select></div><button class="btn btn-primary" onclick="crmV2OpenDonorForm()">+ Tambah Donatur</button></div>
+    <div class="crm-v2-card"><div class="crm-v2-table-wrap"><table class="crm-v2-table"><thead><tr><th>Donatur</th><th>Kontak</th><th>Segmen</th><th>Akad</th><th>Donasi</th><th>Transaksi</th><th>Durasi</th><th>Last Donation</th><th>Follow Up</th><th>Aksi</th></tr></thead><tbody>${rows.map(d=>`<tr><td><strong>${esc(d.name)}</strong><br><small>${esc(d.city||'-')}</small></td><td>${esc(d.phone||'-')}<br><small>${esc(d.email||'-')}</small></td><td>${esc(d.segment||'-')}</td><td>${esc(d.akadProgram||'-')}</td><td>${rupiah(d.totalDonation)}</td><td>${d.transactionCount||0}</td><td>${d.durationMonths||0} bln</td><td>${crmV2FmtDate(d.lastDonation)}</td><td>${crmV2FmtDate(d.followUp)}</td><td><button class="btn btn-secondary btn-small" onclick="crmV2OpenDonorDetail('${esc(d.supabaseId||d.id)}')">Profil</button> <button class="btn btn-secondary btn-small" onclick="crmV2OpenDonorForm('${esc(d.id)}')">Edit</button></td></tr>`).join('')||`<tr><td colspan="10"><div class="crm-v2-empty">Belum ada donor sesuai filter.</div></td></tr>`}</tbody></table></div></div>
+  `);
+}
+
+async function crmV2Target(){
+  const month=crmV2State.month;
+  const {data:targets,error:tErr}=await supabaseClient.from('v_crm_monthly_targets').select('*').eq('target_month',crmV2MonthStart(month));
+  if(tErr){toast('Target CRM gagal dimuat: '+tErr.message);return crmV2Root('<div class="crm-v2-empty">Target belum tersedia.</div>')}
+  const t=targets?.[0]||null;
+  const {data:real}=await supabaseClient.from('v_crm_monthly_realization').select('*').eq('month_start',crmV2MonthStart(month)).maybeSingle();
+  const target=Number(t?.crm_target_amount||0), realization=Number(real?.total_realization||0), pct=target?realization/target*100:0;
+  return crmV2Root(`
+    <div class="crm-v2-toolbar"><div class="field"><label>Bulan</label><input type="month" value="${esc(month)}" onchange="crmV2ChangeMonth(this.value)"></div><div style="margin-left:auto" class="crm-v2-muted">Target CRM bersumber dari Target Fundraising yang sama. Tidak dibuat target kedua.</div></div>
+    <div class="crm-v2-grid">${kpiPlain('Target CRM',rupiah(target),month)}${kpiPlain('Realisasi',rupiah(realization),crmV2Pct(pct))}${kpiPlain('Sisa Target',rupiah(Math.max(target-realization,0)),'Belum tercapai')}${kpiPlain('Transaksi',String(real?.total_transactions||0),'Bulan berjalan')}</div>
+    <div class="crm-v2-card" style="margin-top:14px"><div class="section-title">Pencapaian Target CRM</div><div style="margin-top:10px" class="crm-v2-progress"><span style="width:${Math.min(100,Math.max(0,pct))}%"></span></div><div style="margin-top:7px;font-weight:800;color:#0d3153">${crmV2Pct(pct)}</div><div class="crm-v2-muted" style="margin-top:7px">Target resmi dikelola bersama dengan 6 sumber Fundraising. Gunakan menu Fundraising → Target Bulanan untuk mengubah alokasi target.</div><div style="margin-top:10px"><button class="btn btn-primary btn-small" onclick="showPage('fundraising');setTimeout(()=>{try{frV2OpenTab('target')}catch(e){}},150)">Kelola Target Bulanan →</button></div></div>
+  `);
+}
+
+function crmV2Daily(){
+  return crmV2Root(`
+    <div class="crm-v2-card"><div class="section-title">Update Donasi Harian</div><p class="crm-v2-muted" style="margin-top:4px">Setiap transaksi disimpan satu kali di Fundraising dengan sumber CRM. Ringkasan donor akan diperbarui otomatis.</p><div style="margin-top:10px"><button class="btn btn-primary" onclick="crmV2OpenDailyForm()">+ Catat Donasi</button></div></div>
+    <div class="crm-v2-card" style="margin-top:14px"><div class="section-title">Rekap Harian</div><div class="crm-v2-table-wrap" style="margin-top:10px"><table class="crm-v2-table"><thead><tr><th>Tanggal</th><th>Donor</th><th>Akad</th><th>Program</th><th>Nominal</th><th>PIC</th></tr></thead><tbody id="crmV2DailyBody"><tr><td colspan="6">Memuat...</td></tr></tbody></table></div></div>
+  `);
+}
+
+async function crmV2RenderDailyRows(){
+  const body=document.getElementById('crmV2DailyBody');if(!body)return;
+  const start=crmV2MonthStart(crmV2State.month); const end=new Date(start); end.setMonth(end.getMonth()+1); const endKey=end.toISOString().slice(0,10);
+  try{
+    const {data:sources}=await supabaseClient.from('fundraising_sources').select('id').eq('code','CRM').maybeSingle();
+    if(!sources){body.innerHTML='<tr><td colspan="6">Sumber CRM belum tersedia.</td></tr>';return}
+    const {data,error}=await supabaseClient.from('fundraising_transactions').select('id,transaction_date,donor_id,donor_name,program_name,akad_program,amount,pic_name,status').eq('fundraising_source_id',sources.id).gte('transaction_date',start).lt('transaction_date',endKey).order('transaction_date',{ascending:false});
+    if(error)throw error;
+    body.innerHTML=(data||[]).filter(x=>x.status==='Sukses').map(x=>`<tr><td>${crmV2FmtDate(x.transaction_date)}</td><td>${esc(x.donor_name||crmV2Donor(x.donor_id)?.name||'-')}</td><td>${esc(x.akad_program||'-')}</td><td>${esc(x.program_name||'-')}</td><td>${rupiah(x.amount)}</td><td>${esc(x.pic_name||'-')}</td></tr>`).join('')||'<tr><td colspan="6"><div class="crm-v2-empty">Belum ada donasi pada periode ini.</div></td></tr>';
+  }catch(err){body.innerHTML=`<tr><td colspan="6">Gagal memuat: ${esc(err?.message||'Unknown error')}</td></tr>`}
+}
+
+function crmV2Followup(){
+  const rows=crmV2State.followups.filter(f=>!crmV2State.donorId||f.donor_id===crmV2State.donorId);
+  return crmV2Root(`
+    <div class="crm-v2-toolbar"><div class="field"><label>Donatur</label><select onchange="crmV2State.donorId=this.value;crmV2Render()"><option value="">Semua Donatur</option>${(state.crm||[]).map(d=>`<option value="${esc(d.supabaseId||d.id)}" ${crmV2State.donorId===(d.supabaseId||d.id)?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div><button class="btn btn-primary" onclick="crmV2OpenFollowupForm()">+ Follow Up</button></div>
+    <div class="crm-v2-card"><div class="crm-v2-table-wrap"><table class="crm-v2-table"><thead><tr><th>Donatur</th><th>Tanggal</th><th>Status</th><th>Channel</th><th>Hasil</th><th>Next Follow-up</th><th>Catatan</th></tr></thead><tbody>${rows.map(f=>`<tr><td>${esc(crmV2Donor(f.donor_id)?.name||'-')}</td><td>${crmV2FmtDate(f.follow_up_date)}</td><td>${esc(f.status||'-')}</td><td>${esc(f.communication_channel||'-')}</td><td>${esc(f.result||'-')}</td><td>${crmV2FmtDate(f.next_follow_up_date)}</td><td>${esc(f.notes||'-')}</td></tr>`).join('')||'<tr><td colspan="7"><div class="crm-v2-empty">Belum ada follow-up.</div></td></tr>'}</tbody></table></div></div>
+  `);
+}
+
+async function crmV2History(){
+  if(!crmV2State.donorId)return crmV2Root('<div class="crm-v2-card"><div class="section-title">Riwayat Donasi</div><div class="crm-v2-empty">Pilih donor terlebih dahulu.</div></div>');
+  const donor=crmV2Donor(crmV2State.donorId); if(!donor)return crmV2Root('<div class="crm-v2-empty">Donor tidak ditemukan.</div>');
+  const {data,error}=await supabaseClient.from('fundraising_transactions').select('id,transaction_code,transaction_date,program_name,akad_program,amount,status,pic_name,channel,notes').eq('donor_id',donor.supabaseId||donor.id).order('transaction_date',{ascending:false});
+  if(error)return crmV2Root(`<div class="crm-v2-empty">Gagal memuat riwayat: ${esc(error.message)}</div>`);
+  crmV2State.history=data||[];
+  return crmV2Root(`<div class="crm-v2-toolbar"><div class="field" style="flex:1"><label>Donatur</label><select onchange="crmV2State.donorId=this.value;crmV2Render()"><option value="">Pilih donor</option>${(state.crm||[]).map(d=>`<option value="${esc(d.supabaseId||d.id)}" ${crmV2State.donorId===(d.supabaseId||d.id)?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div></div>
+    <div class="crm-v2-detail"><div class="crm-v2-mini"><small>Total Donasi</small><strong>${rupiah(donor.totalDonation)}</strong></div><div class="crm-v2-mini"><small>Transaksi</small><strong>${donor.transactionCount||0}</strong></div><div class="crm-v2-mini"><small>Donasi Pertama</small><strong>${crmV2FmtDate(donor.firstDonation)}</strong></div><div class="crm-v2-mini"><small>Durasi</small><strong>${donor.durationMonths||0} bln</strong></div></div>
+    <div class="crm-v2-card" style="margin-top:14px"><div class="section-title">Riwayat Seluruh Donasi</div><div class="crm-v2-table-wrap" style="margin-top:10px"><table class="crm-v2-table"><thead><tr><th>Tanggal</th><th>Transaksi</th><th>Program</th><th>Akad</th><th>Nominal</th><th>PIC</th><th>Status</th></tr></thead><tbody>${(data||[]).map(x=>`<tr><td>${crmV2FmtDate(x.transaction_date)}</td><td>${esc(x.transaction_code||'-')}</td><td>${esc(x.program_name||'-')}</td><td>${esc(x.akad_program||'-')}</td><td>${rupiah(x.amount)}</td><td>${esc(x.pic_name||'-')}</td><td>${esc(x.status||'-')}</td></tr>`).join('')||'<tr><td colspan="7"><div class="crm-v2-empty">Belum ada transaksi.</div></td></tr>'}</tbody></table></div></div>`);
+}
+
+async function crmV2Reports(){
+  const {data:real}=await supabaseClient.from('v_crm_monthly_realization').select('*').order('month_start',{ascending:false}).limit(12);
+  const rows=real||[];
+  return crmV2Root(`<div class="crm-v2-card"><div class="section-title">Laporan CRM</div><p class="crm-v2-muted" style="margin-top:4px">Rekap realisasi CRM berdasarkan transaksi sumber CRM dari Fundraising.</p><div class="crm-v2-table-wrap" style="margin-top:10px"><table class="crm-v2-table"><thead><tr><th>Periode</th><th>Realisasi</th><th>Transaksi</th><th>Donor Unik</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${crmV2FmtDate(String(r.month_start).slice(0,10))}</td><td>${rupiah(r.total_realization)}</td><td>${r.total_transactions||0}</td><td>${r.unique_donors||0}</td></tr>`).join('')||'<tr><td colspan="4"><div class="crm-v2-empty">Belum ada realisasi CRM.</div></td></tr>'}</tbody></table></div></div>`);
+}
+
+function crmV2OpenTab(tab){crmV2State.tab=tab;crmV2Render()}
+function crmV2ChangeMonth(v){crmV2State.month=v||crmV2State.month;crmV2Render()}
+
+function crmV2Render(){
+  let p='';
+  if(crmV2State.tab==='dashboard')p=crmV2Dashboard();
+  else if(crmV2State.tab==='database')p=crmV2Database();
+  else if(crmV2State.tab==='target')crmV2Target().then(html=>{document.getElementById('content').innerHTML=html;});
+  else if(crmV2State.tab==='daily')p=crmV2Daily();
+  else if(crmV2State.tab==='followup')p=crmV2Followup();
+  else if(crmV2State.tab==='history')crmV2History().then(html=>{document.getElementById('content').innerHTML=html;});
+  else if(crmV2State.tab==='reports')crmV2Reports().then(html=>{document.getElementById('content').innerHTML=html;});
+  if(p){document.getElementById('content').innerHTML=p;if(crmV2State.tab==='daily')setTimeout(crmV2RenderDailyRows,50)}
+  setTimeout(()=>{try{v25ApplyCrudLocks()}catch(e){}},0);
+}
+
+function crmV2OpenDonorForm(id){
+  const x=state.crm.find(a=>a.id===id)||{id:'CRM-'+String(Date.now()).slice(-6),name:'',phone:'',email:'',city:'',region:'',segment:'Donatur Baru',akadProgram:'Sedekah',status:'AKTIF',pic:state.user?.name||'',firstDonation:'',lastDonation:'',totalDonation:0,transactionCount:0,durationMonths:0,followUp:'',doaRequest:'',notes:''};
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui':'Tambah'} Profil Donatur</h2><div class="form-grid">
+  <div class="field full"><label>Nama Donatur</label><input id="crmV2Name" value="${esc(x.name)}"></div>
+  <div class="field"><label>No. HP / WhatsApp</label><input id="crmV2Phone" value="${esc(x.phone||'')}"></div>
+  <div class="field"><label>Email</label><input id="crmV2Email" type="email" value="${esc(x.email||'')}"></div>
+  <div class="field"><label>Asal Daerah</label><input id="crmV2Region" value="${esc(x.region||x.city||'')}"></div>
+  <div class="field"><label>Kota</label><input id="crmV2City" value="${esc(x.city||'')}"></div>
+  <div class="field"><label>PIC CRM</label><input id="crmV2Pic" value="${esc(x.pic||state.user?.name||'')}"></div>
+  <div class="field"><label>Akad Program Default</label><select id="crmV2Akad">${['Sedekah','Infak','Wakaf','Zakat'].map(v=>`<option ${v===x.akadProgram?'selected':''}>${v}</option>`).join('')}</select></div>
+  <div class="field"><label>Status</label><select id="crmV2Status">${['AKTIF','FOLLOW-UP','PERLU DATA','NONAKTIF'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div>
+  <div class="field"><label>Follow-up Berikutnya</label><input id="crmV2Follow" type="date" value="${esc(x.followUp||'')}"></div>
+  <div class="field full"><label>Pesan / Request Doa Donatur</label><textarea id="crmV2Doa" rows="3">${esc(x.doaRequest||'')}</textarea></div>
+  <div class="field full"><label>Catatan</label><textarea id="crmV2Notes" rows="3">${esc(x.notes||'')}</textarea></div>
+  </div><div style="margin-top:12px;color:#6f7e87;font-size:11px">Total donasi, jumlah transaksi, donasi pertama/terakhir, dan durasi donatur diturunkan dari transaksi Fundraising sukses.</div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="crmV2SaveDonor('${esc(id||'')}')">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function crmV2SaveDonor(id){
+  const name=document.getElementById('crmV2Name').value.trim(); if(!name){toast('Nama donatur wajib diisi.');return}
+  try{
+    const user=await getProgramSession(); const existing=state.crm.find(x=>x.id===id); const code=existing?.code||existing?.id||id||'CRM-'+String(Date.now()).slice(-6);
+    const payload={donor_code:code,name,phone:document.getElementById('crmV2Phone').value.trim()||null,email:document.getElementById('crmV2Email').value.trim()||null,region:document.getElementById('crmV2Region').value.trim()||null,city:document.getElementById('crmV2City').value.trim()||null,pic_id:existing?.picId||user.id,pic_name:document.getElementById('crmV2Pic').value.trim()||state.user?.name||'',akad_program:document.getElementById('crmV2Akad').value,status:document.getElementById('crmV2Status').value,follow_up_date:document.getElementById('crmV2Follow').value||null,doa_request:document.getElementById('crmV2Doa').value.trim()||null,notes:document.getElementById('crmV2Notes').value.trim()||null};
+    const q=existing?.supabaseId?await supabaseClient.from('donors').update(payload).eq('id',existing.supabaseId).select('*').single():await supabaseClient.from('donors').upsert(payload,{onConflict:'donor_code'}).select('*').single();
+    if(q.error)throw q.error; const mapped=crmRemoteRowToState(q.data); const i=state.crm.findIndex(x=>x.id===id); if(i>=0)state.crm[i]=mapped;else state.crm.push(mapped); save(); closeModal();crmV2State.tab='database';crmV2Render();toast('Profil donatur tersimpan ✅');
+  }catch(err){toast('Gagal menyimpan donor: '+(err?.message||'Unknown error'))}
+}
+
+async function crmV2OpenDonorDetail(id){
+  const d=crmV2Donor(id); if(!d)return;
+  let hist=[];
+  try{const q=await supabaseClient.from('fundraising_transactions').select('transaction_date,transaction_code,program_name,akad_program,amount,status,pic_name,channel,notes').eq('donor_id',d.supabaseId||d.id).order('transaction_date',{ascending:false}); if(q.error)throw q.error; hist=q.data||[]}catch(err){toast('Riwayat donor gagal dimuat: '+err.message)}
+  document.getElementById('modalBox').innerHTML=`<h2>${esc(d.name)}</h2><div class="crm-v2-detail"><div class="crm-v2-mini"><small>Total Donasi</small><strong>${rupiah(d.totalDonation)}</strong></div><div class="crm-v2-mini"><small>Jumlah Transaksi</small><strong>${d.transactionCount||0}</strong></div><div class="crm-v2-mini"><small>Durasi</small><strong>${d.durationMonths||0} bln</strong></div><div class="crm-v2-mini"><small>Donasi Terakhir</small><strong>${crmV2FmtDate(d.lastDonation)}</strong></div></div><div style="margin-top:12px;font-size:12px;line-height:1.7"><div><strong>WhatsApp:</strong> ${esc(d.phone||'-')}</div><div><strong>Email:</strong> ${esc(d.email||'-')}</div><div><strong>Asal Daerah:</strong> ${esc(d.region||d.city||'-')}</div><div><strong>PIC:</strong> ${esc(d.pic||'-')}</div><div><strong>Request Doa:</strong> ${esc(d.doaRequest||'-')}</div><div><strong>Catatan:</strong> ${esc(d.notes||'-')}</div></div><div class="section-title" style="margin-top:14px">Riwayat Donasi</div><div class="crm-v2-table-wrap" style="margin-top:8px"><table class="crm-v2-table"><thead><tr><th>Tanggal</th><th>Program</th><th>Akad</th><th>Nominal</th><th>PIC</th><th>Status</th></tr></thead><tbody>${hist.map(x=>`<tr><td>${crmV2FmtDate(x.transaction_date)}</td><td>${esc(x.program_name||'-')}</td><td>${esc(x.akad_program||'-')}</td><td>${rupiah(x.amount)}</td><td>${esc(x.pic_name||'-')}</td><td>${esc(x.status||'-')}</td></tr>`).join('')||'<tr><td colspan="6">Belum ada transaksi.</td></tr>'}</tbody></table></div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button> <button class="btn btn-primary" onclick="closeModal();crmV2OpenDailyForm('${esc(d.id)}')">+ Catat Donasi</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function crmV2OpenDailyForm(donorStateId){
+  const donors=state.crm||[]; const d=donorStateId?donors.find(x=>x.id===donorStateId||x.supabaseId===donorStateId):donors[0];
+  const source=await supabaseClient.from('fundraising_sources').select('id,name').eq('code','CRM').maybeSingle(); if(source.error||!source.data){toast('Sumber CRM belum tersedia.');return}
+  const progs=state.programs||[];
+  document.getElementById('modalBox').innerHTML=`<h2>Update Donasi Harian</h2><div class="form-grid"><div class="field full"><label>Donatur</label><select id="crmDailyDonor"><option value="">Pilih donor</option>${donors.map(x=>`<option value="${esc(x.supabaseId||x.id)}" ${d&&((d.supabaseId||d.id)===(x.supabaseId||x.id))?'selected':''}>${esc(x.name)}${x.phone?' · '+esc(x.phone):''}</option>`).join('')}</select></div><div class="field"><label>Tanggal Donasi</label><input id="crmDailyDate" type="date" value="${dateId()}"></div><div class="field"><label>Akad Program</label><select id="crmDailyAkad">${['Sedekah','Infak','Wakaf','Zakat'].map(v=>`<option ${d?.akadProgram===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>Program</label><select id="crmDailyProgram"><option value="">Pilih Program</option>${progs.map(p=>`<option value="${esc(p.supabaseId||p.id)}">${esc(p.name)}</option>`).join('')}</select></div><div class="field"><label>Program Custom (opsional)</label><input id="crmDailyProgramCustom" placeholder="Ketik nama program bila belum ada di master"></div><div class="field"><label>Nominal Donasi (Rp)</label><input id="crmDailyAmount" type="number" min="0" value="0"></div><div class="field"><label>Metode / Channel</label><input id="crmDailyChannel" placeholder="Transfer, QRIS, Cash, dll."></div><div class="field"><label>PIC CRM</label><input id="crmDailyPic" value="${esc(state.user?.name||'')}"></div><div class="field full"><label>Pesan / Request Doa Donatur</label><textarea id="crmDailyDoa" rows="3" placeholder="Pesan atau request doa dari donatur"></textarea></div><div class="field full"><label>Catatan</label><textarea id="crmDailyNotes" rows="3"></textarea></div></div><div class="crm-v2-card" style="margin-top:10px;background:#f8fbfc"><small>Transaksi ini akan tersimpan sebagai <strong>Fundraising Source = CRM</strong> dan otomatis masuk ke histori donor, realisasi CRM dan laporan Fundraising.</small></div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="crmV2SaveDaily('${esc(source.data.id)}')">Simpan Donasi</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function crmV2SaveDaily(sourceId){
+  const donorId=document.getElementById('crmDailyDonor').value; const amount=moneyNumber(document.getElementById('crmDailyAmount').value); if(!donorId){toast('Donatur wajib dipilih.');return} if(amount<=0){toast('Nominal donasi harus lebih dari 0.');return}
+  try{
+    const user=await getProgramSession(); const donor=crmV2Donor(donorId); const programId=document.getElementById('crmDailyProgram').value||null; const customProgram=document.getElementById('crmDailyProgramCustom').value.trim()||null;
+    const code='CRM-'+Date.now().toString().slice(-10);
+    const payload={transaction_code:code,transaction_date:document.getElementById('crmDailyDate').value||dateId(),donor_id:donor?.supabaseId||donorId,donor_name:donor?.name||null,program_id:programId,program_name:customProgram||((state.programs||[]).find(p=>(p.supabaseId||p.id)===programId)?.name||null),channel:document.getElementById('crmDailyChannel').value.trim()||null,source_type:'CRM',akad_program:document.getElementById('crmDailyAkad').value,amount,status:'Sukses',pic_id:user.id,pic_name:document.getElementById('crmDailyPic').value.trim()||state.user?.name||'',notes:[document.getElementById('crmDailyDoa').value.trim(),document.getElementById('crmDailyNotes').value.trim()].filter(Boolean).join(' | ')||null,fundraising_source_id:sourceId};
+    const q=await supabaseClient.from('fundraising_transactions').insert(payload).select('id').single(); if(q.error)throw q.error;
+    closeModal(); await syncCRMFromSupabase(); crmV2State.tab='daily'; crmV2Render(); toast('Donasi harian tersimpan ✅');
+  }catch(err){toast('Gagal menyimpan donasi: '+(err?.message||'Unknown error'))}
+}
+
+function crmV2OpenFollowupForm(){
+  document.getElementById('modalBox').innerHTML=`<h2>Tambah Follow Up Donatur</h2><div class="form-grid"><div class="field full"><label>Donatur</label><select id="crmFuDonor"><option value="">Pilih donor</option>${(state.crm||[]).map(d=>`<option value="${esc(d.supabaseId||d.id)}" ${crmV2State.donorId===(d.supabaseId||d.id)?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div><div class="field"><label>Tanggal Follow Up</label><input id="crmFuDate" type="date" value="${dateId()}"></div><div class="field"><label>Status</label><select id="crmFuStatus">${['TERJADWAL','SELESAI','PERLU TINDAK LANJUT','TIDAK TERHUBUNG'].map(v=>`<option>${v}</option>`).join('')}</select></div><div class="field"><label>Channel</label><select id="crmFuChannel">${['WhatsApp','Telepon','Email','Pertemuan','Lainnya'].map(v=>`<option>${v}</option>`).join('')}</select></div><div class="field"><label>Next Follow Up</label><input id="crmFuNext" type="date"></div><div class="field full"><label>Hasil Komunikasi</label><textarea id="crmFuResult" rows="3"></textarea></div><div class="field full"><label>Catatan</label><textarea id="crmFuNotes" rows="3"></textarea></div></div><div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="crmV2SaveFollowup()">Simpan</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+async function crmV2SaveFollowup(){
+  const donorId=document.getElementById('crmFuDonor').value; if(!donorId){toast('Donatur wajib dipilih.');return}
+  try{const user=await getProgramSession(); const payload={donor_id:donorId,follow_up_date:document.getElementById('crmFuDate').value||null,pic_id:user.id,status:document.getElementById('crmFuStatus').value,communication_channel:document.getElementById('crmFuChannel').value,result:document.getElementById('crmFuResult').value.trim()||null,next_follow_up_date:document.getElementById('crmFuNext').value||null,notes:document.getElementById('crmFuNotes').value.trim()||null};const q=await supabaseClient.from('donor_followups').insert(payload).select('*').single();if(q.error)throw q.error;crmV2State.followups.unshift(q.data);closeModal();crmV2State.tab='followup';crmV2Render();toast('Follow up tersimpan ✅')}catch(err){toast('Gagal menyimpan follow up: '+(err?.message||'Unknown error'))}
+}
+
+const _showPageBeforeCRMv2=showPage;
+showPage=function(page){
+  if(page==='crm'){
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page==='crm'));
+    document.getElementById('topTitle').textContent='CRM / Donor';
+    document.getElementById('sidebar').classList.remove('open');
+    crmV2State.tab='dashboard';
+    crmV2Render();
+    crmV2Load();
+    return;
+  }
+  _showPageBeforeCRMv2(page);
+};
+
+window.crmV2OpenDonorForm=crmV2OpenDonorForm;
+window.crmV2OpenDonorDetail=crmV2OpenDonorDetail;
+window.crmV2OpenDailyForm=crmV2OpenDailyForm;
+window.crmV2OpenFollowupForm=crmV2OpenFollowupForm;
+window.crmV2OpenTab=crmV2OpenTab;
+</script>
 </body>
 </html>
