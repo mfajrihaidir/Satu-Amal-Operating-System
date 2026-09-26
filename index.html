@@ -4807,6 +4807,35 @@ function escGeminiText(v){
   return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 }
 
+/* Normalise Gemini output so object items never render as [object Object]. */
+function geminiItemText(v){
+  if(v===null || v===undefined) return '';
+  if(typeof v==='string' || typeof v==='number' || typeof v==='boolean') return String(v);
+  if(Array.isArray(v)) return v.map(geminiItemText).filter(Boolean).join(' • ');
+  if(typeof v==='object'){
+    const preferred=['text','title','action','recommendation','description','detail','reason','priority','focus','item','finding','risk','opportunity','note'];
+    const parts=[];
+    preferred.forEach(k=>{
+      if(v[k]!==undefined && v[k]!==null && v[k]!=='' ){
+        const value=geminiItemText(v[k]);
+        if(value) parts.push(k==='priority' ? `Prioritas: ${value}` : value);
+      }
+    });
+    if(parts.length) return [...new Set(parts)].join(' — ');
+    try{return JSON.stringify(v);}catch(e){return String(v);}
+  }
+  return String(v);
+}
+
+function geminiListItems(arr){
+  if(!Array.isArray(arr)) return [];
+  return arr.map(geminiItemText).map(x=>x.trim()).filter(Boolean);
+}
+
+function geminiSingleText(v){
+  return geminiItemText(v).trim();
+}
+
 function renderGeminiResult(result){
   const host=document.getElementById('geminiAIResult');
   if(!host)return;
@@ -4815,13 +4844,16 @@ function renderGeminiResult(result){
     return;
   }
   const a=result.analysis||{};
-  const list=(arr)=>Array.isArray(arr)?arr.map(x=>`<div style="padding:9px 10px;border:1px solid #e7edf3;border-radius:9px;background:#fafcfe;font-size:11px;line-height:1.5">${escGeminiText(x)}</div>`).join(''):'<div style="font-size:11px;color:var(--muted)">Tidak ada.</div>';
+  const list=(arr)=>{
+    const items=geminiListItems(arr);
+    return items.length?items.map(x=>`<div style="padding:9px 10px;border:1px solid #e7edf3;border-radius:9px;background:#fafcfe;font-size:11px;line-height:1.5">${escGeminiText(x)}</div>`).join(''):'<div style="font-size:11px;color:var(--muted)">Tidak ada.</div>';
+  };
   host.innerHTML=`
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px">
       <div><div style="font-weight:800;font-size:14px">Analisis AI Gemini</div><div style="font-size:10px;color:var(--muted);margin-top:3px">${escGeminiText(result.provider||'Google Gemini API')} • ${escGeminiText(result.model||'gemini-3.1-flash-lite')}</div></div>
       <span class="badge b-green">AI LIVE</span>
     </div>
-    <div style="padding:10px 12px;border-radius:9px;background:#f5fbf9;border-left:3px solid #25b995;font-size:11px;line-height:1.6"><strong>Executive Summary</strong><br>${escGeminiText(a.executive_summary||'Tidak tersedia.')}</div>
+    <div style="padding:10px 12px;border-radius:9px;background:#f5fbf9;border-left:3px solid #25b995;font-size:11px;line-height:1.6"><strong>Executive Summary</strong><br>${escGeminiText(geminiSingleText(a.executive_summary)||'Tidak tersedia.')}</div>
     <div class="grid two" style="margin-top:12px">
       <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Temuan Utama</div><div style="display:grid;gap:7px">${list(a.key_findings)}</div></div>
       <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Risiko / Perhatian</div><div style="display:grid;gap:7px">${list(a.risks)}</div></div>
@@ -4875,13 +4907,13 @@ async function saveGeminiAIReport(){
     const end=`${y}-${String(m).padStart(2,'0')}-${String(endDay).padStart(2,'0')}`;
     const a=geminiAIResult.analysis;
     const aiText=[
-      'EXECUTIVE SUMMARY',a.executive_summary||'',
-      '', 'TEMUAN UTAMA',...(a.key_findings||[]),
-      '', 'RISIKO / PERHATIAN',...(a.risks||[]),
-      '', 'PELUANG',...(a.opportunities||[]),
-      '', 'REKOMENDASI TINDAKAN',...(a.recommended_actions||[]),
-      '', 'FOKUS 7 HARI',...(a.seven_day_focus||[]),
-      '', 'CATATAN KUALITAS DATA',...(a.data_quality_notes||[])
+      'EXECUTIVE SUMMARY',geminiSingleText(a.executive_summary),
+      '', 'TEMUAN UTAMA',...geminiListItems(a.key_findings),
+      '', 'RISIKO / PERHATIAN',...geminiListItems(a.risks),
+      '', 'PELUANG',...geminiListItems(a.opportunities),
+      '', 'REKOMENDASI TINDAKAN',...geminiListItems(a.recommended_actions),
+      '', 'FOKUS 7 HARI',...geminiListItems(a.seven_day_focus),
+      '', 'CATATAN KUALITAS DATA',...geminiListItems(a.data_quality_notes)
     ].join('\n');
     const code=`RPT-AI-${String(Date.now()).slice(-9)}`;
     const payload={report_code:code,title:`Laporan AI Gemini ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + AI Gemini',status:'Draft',summary:String(a.executive_summary||''),ai_analysis:aiText,created_by:session.user.id};
