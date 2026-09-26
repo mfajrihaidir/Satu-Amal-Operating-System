@@ -4742,5 +4742,173 @@ showPage = function(page){
 };
 </script>
 
+
+<script>
+/* =========================================================
+   V17 — GEMINI FREE-TIER AI REPORTING
+   Additive only: keeps V16 live Supabase reporting intact.
+   ========================================================= */
+let geminiAIResult = null;
+let geminiAIBusy = false;
+
+function buildGeminiContext(data, month, programId){
+  const base = buildLiveAnalysis(data, month, programId);
+  const programName = programId ? (data.programs.find(x=>x.id===programId)?.name || programId) : 'Semua Program';
+  const segmentCounts = data.donors.reduce((acc,x)=>{ const k=String(x.segment||'Tidak diisi'); acc[k]=(acc[k]||0)+1; return acc; },{});
+  const channelTotals = data.fundraising.reduce((acc,x)=>{ const k=String(x.channel||'Lainnya'); acc[k]=(acc[k]||0)+Number(x.amount||0); return acc; },{});
+  const overdueTasks = data.tasks.filter(x=>x.deadline && String(x.deadline)<new Date().toISOString().slice(0,10) && !['COMPLETED','SELESAI','DONE'].includes(normalizeLiveStatus(x.status))).length;
+  const activePrograms = data.programs.filter(x=>['ACTIVE','AKTIF','ON TRACK','ONGOING'].includes(normalizeLiveStatus(x.status))).length;
+  const totalBudget = data.programs.reduce((a,x)=>a+Number(x.budget||0),0);
+  const totalRealization = data.programs.reduce((a,x)=>a+Number(x.realization||0),0);
+  return {
+    periode: month || 'Semua periode',
+    program: programName,
+    instruction: 'Analisis data organisasi secara faktual. Jangan mengarang angka. Bedakan temuan berbasis data dengan interpretasi. Gunakan bahasa Indonesia yang ringkas dan operasional.',
+    kpi: {
+      fundraising_total: base.fundraisingTotal,
+      fundraising_transactions: data.fundraising.length,
+      cash_in: base.cashIn,
+      cash_out: base.cashOut,
+      net_cash_flow: base.cashIn-base.cashOut,
+      active_programs: activePrograms,
+      total_programs: base.programCount,
+      program_budget_total: totalBudget,
+      program_realization_total: totalRealization,
+      published_content: base.published,
+      total_reach: base.reach,
+      donors: data.donors.length,
+      donor_total_recorded: base.donorTotal,
+      follow_up_items: base.followUp,
+      active_partnerships: base.partnerActive,
+      partnership_pipeline: base.pipeline,
+      documentation_files: base.docsFiles,
+      tasks_total: data.tasks.length,
+      tasks_completed: base.taskDone,
+      task_progress_avg: base.taskProgress,
+      tasks_overdue: overdueTasks,
+      attendance_records: data.attendance.length,
+      attendance_complete: base.attComplete,
+      attendance_rate: base.attRate,
+      administration_records: data.administration.length,
+      administration_overdue: base.adminOverdue
+    },
+    fundraising_by_channel: channelTotals,
+    donor_segments: segmentCounts,
+    existing_rule_based_findings: base.observations,
+    existing_risks: base.risks,
+    existing_actions: base.actions
+  };
+}
+
+function escGeminiText(v){
+  const s=String(v??'');
+  return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+}
+
+function renderGeminiResult(result){
+  const host=document.getElementById('geminiAIResult');
+  if(!host)return;
+  if(!result){
+    host.innerHTML='<div style="color:var(--muted);font-size:11px">Belum ada analisis generatif. Klik <strong>Analisis AI Gemini</strong>.</div>';
+    return;
+  }
+  const a=result.analysis||{};
+  const list=(arr)=>Array.isArray(arr)?arr.map(x=>`<div style="padding:9px 10px;border:1px solid #e7edf3;border-radius:9px;background:#fafcfe;font-size:11px;line-height:1.5">${escGeminiText(x)}</div>`).join(''):'<div style="font-size:11px;color:var(--muted)">Tidak ada.</div>';
+  host.innerHTML=`
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px">
+      <div><div style="font-weight:800;font-size:14px">Analisis AI Gemini</div><div style="font-size:10px;color:var(--muted);margin-top:3px">${escGeminiText(result.provider||'Google Gemini API')} • ${escGeminiText(result.model||'gemini-3.1-flash-lite')}</div></div>
+      <span class="badge b-green">AI LIVE</span>
+    </div>
+    <div style="padding:10px 12px;border-radius:9px;background:#f5fbf9;border-left:3px solid #25b995;font-size:11px;line-height:1.6"><strong>Executive Summary</strong><br>${escGeminiText(a.executive_summary||'Tidak tersedia.')}</div>
+    <div class="grid two" style="margin-top:12px">
+      <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Temuan Utama</div><div style="display:grid;gap:7px">${list(a.key_findings)}</div></div>
+      <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Risiko / Perhatian</div><div style="display:grid;gap:7px">${list(a.risks)}</div></div>
+      <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Peluang</div><div style="display:grid;gap:7px">${list(a.opportunities)}</div></div>
+      <div><div style="font-size:12px;font-weight:800;margin-bottom:7px">Rekomendasi Tindakan</div><div style="display:grid;gap:7px">${list(a.recommended_actions)}</div></div>
+    </div>
+    <div style="margin-top:12px"><div style="font-size:12px;font-weight:800;margin-bottom:7px">Fokus 7 Hari</div><div style="display:grid;gap:7px">${list(a.seven_day_focus)}</div></div>
+    <div style="margin-top:12px"><div style="font-size:12px;font-weight:800;margin-bottom:7px">Catatan Kualitas Data</div><div style="display:grid;gap:7px">${list(a.data_quality_notes)}</div></div>`;
+}
+
+async function runGeminiAIReport(){
+  if(geminiAIBusy)return;
+  geminiAIBusy=true;
+  const button=document.getElementById('geminiAIButton');
+  const status=document.getElementById('geminiAIStatus');
+  try{
+    if(!liveReportingData){ await refreshLiveReporting(); }
+    if(!liveReportingData) throw new Error('Data pelaporan belum tersedia.');
+    const month=localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+    const programId=localStorage.getItem('sa_report_program_live')||'';
+    const context=buildGeminiContext(liveReportingData,month,programId);
+    if(button){button.disabled=true;button.textContent='⏳ Menganalisis...';}
+    if(status)status.textContent='Mengirim ringkasan data ke Gemini...';
+    const result=await supabaseClient.functions.invoke('ai-report',{body:{context}});
+    if(result.error) throw result.error;
+    if(!result.data?.ok) throw new Error(result.data?.error||'AI tidak mengembalikan hasil.');
+    geminiAIResult=result.data;
+    renderGeminiResult(geminiAIResult);
+    if(status)status.textContent='Analisis AI selesai ✅';
+    toast('Analisis AI Gemini berhasil ✅');
+  }catch(err){
+    console.error('GEMINI AI REPORT ERROR:',err);
+    if(status)status.textContent='Gagal: '+(err?.message||'Unknown error');
+    toast('Analisis AI gagal: '+(err?.message||'Unknown error'));
+  }finally{
+    geminiAIBusy=false;
+    if(button){button.disabled=false;button.textContent='✨ Analisis AI Gemini';}
+  }
+}
+
+async function saveGeminiAIReport(){
+  try{
+    if(!geminiAIResult?.analysis) throw new Error('Jalankan Analisis AI Gemini terlebih dahulu.');
+    const session=await getSupabaseSession();
+    if(!session?.user) throw new Error('Sesi login Supabase belum aktif.');
+    const month=localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+    const programId=localStorage.getItem('sa_report_program_live')||null;
+    const [y,m]=String(month).split('-').map(Number);
+    const start=`${y}-${String(m).padStart(2,'0')}-01`;
+    const endDay=new Date(Date.UTC(y,m,0)).getUTCDate();
+    const end=`${y}-${String(m).padStart(2,'0')}-${String(endDay).padStart(2,'0')}`;
+    const a=geminiAIResult.analysis;
+    const aiText=[
+      'EXECUTIVE SUMMARY',a.executive_summary||'',
+      '', 'TEMUAN UTAMA',...(a.key_findings||[]),
+      '', 'RISIKO / PERHATIAN',...(a.risks||[]),
+      '', 'PELUANG',...(a.opportunities||[]),
+      '', 'REKOMENDASI TINDAKAN',...(a.recommended_actions||[]),
+      '', 'FOKUS 7 HARI',...(a.seven_day_focus||[]),
+      '', 'CATATAN KUALITAS DATA',...(a.data_quality_notes||[])
+    ].join('\n');
+    const code=`RPT-AI-${String(Date.now()).slice(-9)}`;
+    const payload={report_code:code,title:`Laporan AI Gemini ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + AI Gemini',status:'Draft',summary:String(a.executive_summary||''),ai_analysis:aiText,created_by:session.user.id};
+    const {error}=await supabaseClient.from('reports').upsert(payload,{onConflict:'report_code'});
+    if(error)throw error;
+    toast('Laporan AI Gemini tersimpan ke Supabase ✅');
+    await refreshLiveReporting();
+  }catch(err){
+    console.error('SAVE GEMINI REPORT ERROR:',err);
+    toast('Gagal menyimpan laporan AI: '+(err?.message||'Unknown error'));
+  }
+}
+
+/* Add the Gemini controls and result card after V16 renders the live report. */
+const _v17BaseRenderLiveReportingPage=renderLiveReportingPage;
+renderLiveReportingPage=function(){
+  _v17BaseRenderLiveReportingPage();
+  const content=document.getElementById('content');
+  if(!content || document.getElementById('geminiAIBlock'))return;
+  const block=document.createElement('div');
+  block.id='geminiAIBlock';
+  block.className='card';
+  block.style.cssText='padding:16px;margin-top:16px;background:linear-gradient(135deg,#f8fbff,#f2fbf8);border:1px solid #dcebef';
+  block.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="section-title" style="margin-bottom:3px">✨ Analisis AI Generatif</div><div style="font-size:10px;color:var(--muted)">Gemini Free Tier • membaca ringkasan data live Supabase • tidak memakai OpenAI</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="geminiAIButton" class="btn btn-primary btn-small" onclick="runGeminiAIReport()">✨ Analisis AI Gemini</button><button class="btn btn-secondary btn-small" onclick="saveGeminiAIReport()">Simpan Hasil AI</button></div></div><div id="geminiAIStatus" style="margin-top:9px;font-size:10px;color:var(--muted)">Belum dijalankan.</div><div id="geminiAIResult" style="margin-top:12px"></div>`;
+  const firstCard=content.querySelector('.grid.kpis');
+  if(firstCard)firstCard.insertAdjacentElement('afterend',block); else content.appendChild(block);
+  renderGeminiResult(geminiAIResult);
+};
+</script>
+
 </body>
 </html>
