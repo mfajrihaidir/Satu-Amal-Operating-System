@@ -4488,6 +4488,258 @@ window.saveTask=saveTaskRemote;
 window.deleteTaskRemote=deleteTaskRemote;
 
 setTimeout(()=>{try{syncTasksFromSupabase();}catch(e){}},1300);
+
+
+/* =========================================================
+   STAGE 2 FINAL — REPORTING + LIVE SUPABASE + AI ANALYSIS
+   V16: Reporting membaca langsung database Supabase.
+   Catatan: analisis otomatis di bawah adalah engine lokal berbasis
+   aturan/indikator dari data live. Field reports.ai_analysis disiapkan
+   untuk integrasi model AI eksternal yang aman via Edge Function.
+   ========================================================= */
+let liveReportingBusy = false;
+let liveReportingData = null;
+
+function liveMonthRange(month){
+  if(!month) return {start:null,end:null};
+  const [y,m]=String(month).split('-').map(Number);
+  if(!y||!m) return {start:null,end:null};
+  const start = `${y}-${String(m).padStart(2,'0')}-01`;
+  const last = new Date(Date.UTC(y,m,0)).getUTCDate();
+  const end = `${y}-${String(m).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
+  return {start,end};
+}
+
+async function liveQuery(table, columns, month, dateColumn, programId){
+  if(!window.supabase || !window.supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+  let q = supabaseClient.from(table).select(columns);
+  const range = liveMonthRange(month);
+  if(range.start && dateColumn) q=q.gte(dateColumn,range.start).lte(dateColumn,range.end);
+  if(programId && programId!=='all' && ['fundraising_transactions','contents','partnerships','documentation','tasks','cash_flows','administration'].includes(table)) q=q.eq('program_id',programId);
+  const {data,error}=await q;
+  if(error) throw error;
+  return data||[];
+}
+
+async function fetchLiveReportingData(month,programId){
+  const tasks = await liveQuery('tasks','id,task_code,title,status,progress,deadline,program_id,pic_id,pic_name',month,'deadline',programId);
+  const [fundraising,contents,partnerships,documents,attendance,administration,cashFlows] = await Promise.all([
+    liveQuery('fundraising_transactions','id,transaction_date,amount,status,program_id,channel,source_type,akad_program,donor_id',month,'transaction_date',programId),
+    liveQuery('contents','id,title,status,publish_date,reach,engagement,program_id',month,'publish_date',programId),
+    liveQuery('partnerships','id,partner_name,status,stage,potential_value,realized_value,next_action_date,program_id',month,'next_action_date',programId),
+    liveQuery('documentation','id,title,doc_type,file_count,captured_date,program_id',month,'captured_date',programId),
+    liveQuery('attendance','id,attendance_date,check_in,check_out,user_id',month,'attendance_date',''),
+    liveQuery('administration','id,title,status,document_date,due_date,program_id',month,'document_date',programId),
+    liveQuery('cash_flows','id,transaction_code,transaction_date,flow_type,category,amount,program_id,description,account,pic_name',month,'transaction_date',programId)
+  ]);
+  const programsQuery = await supabaseClient.from('programs').select('id,code,name,category,status,target,budget,progress,realization,pic_name');
+  if(programsQuery.error) throw programsQuery.error;
+  const donorsQuery = await supabaseClient.from('donors').select('id,name,status,segment,akad_program,total_donation,last_donation,follow_up_date');
+  if(donorsQuery.error) throw donorsQuery.error;
+  const reportsQuery = await supabaseClient.from('reports').select('id,report_code,title,period_start,period_end,program_id,report_type,status,summary,ai_analysis,created_by,created_at,updated_at').order('created_at',{ascending:false});
+  if(reportsQuery.error) throw reportsQuery.error;
+  return {
+    programs: programsQuery.data||[], fundraising, contents, partnerships, documents,
+    attendance, administration, cashFlows, tasks, donors:donorsQuery.data||[], reports:reportsQuery.data||[]
+  };
+}
+
+function normalizeLiveStatus(v){return String(v||'').trim().toUpperCase();}
+
+function buildLiveAnalysis(data,month,programId){
+  const fundraisingTotal=data.fundraising.reduce((a,x)=>a+Number(x.amount||0),0);
+  const cashIn=data.cashFlows.filter(x=>normalizeLiveStatus(x.flow_type)==='IN'||normalizeLiveStatus(x.flow_type)==='PEMASUKAN').reduce((a,x)=>a+Number(x.amount||0),0);
+  const cashOut=data.cashFlows.filter(x=>normalizeLiveStatus(x.flow_type)==='OUT'||normalizeLiveStatus(x.flow_type)==='PENGELUARAN').reduce((a,x)=>a+Number(x.amount||0),0);
+  const published=data.contents.filter(x=>normalizeLiveStatus(x.status)==='TERBIT').length;
+  const reach=data.contents.reduce((a,x)=>a+Number(x.reach||0),0);
+  const taskDone=data.tasks.filter(x=>['COMPLETED','SELESAI','DONE'].includes(normalizeLiveStatus(x.status))).length;
+  const taskProgress=data.tasks.length?Math.round(data.tasks.reduce((a,x)=>a+Number(x.progress||0),0)/data.tasks.length):0;
+  const partnerActive=data.partnerships.filter(x=>normalizeLiveStatus(x.status)==='AKTIF').length;
+  const pipeline=data.partnerships.reduce((a,x)=>a+Number(x.potential_value||0),0);
+  const donorTotal=data.donors.reduce((a,x)=>a+Number(x.total_donation||0),0);
+  const followUp=data.donors.filter(x=>['FOLLOW-UP','PERLU DATA'].includes(normalizeLiveStatus(x.status))).length;
+  const docsFiles=data.documents.reduce((a,x)=>a+Number(x.file_count||0),0);
+  const attComplete=data.attendance.filter(x=>x.check_in&&x.check_out).length;
+  const attRate=data.attendance.length?Math.round(attComplete/data.attendance.length*100):0;
+  const adminOverdue=data.administration.filter(x=>x.due_date && String(x.due_date)<new Date().toISOString().slice(0,10) && normalizeLiveStatus(x.status)!=='SELESAI').length;
+  const programCount=programId ? data.programs.filter(x=>x.id===programId).length : data.programs.length;
+
+  const observations=[
+    `Fundraising pada filter ${month||'semua periode'} tercatat ${rupiah(fundraisingTotal)} dari ${data.fundraising.length} transaksi.`,
+    `Arus kas tercatat masuk ${rupiah(cashIn)} dan keluar ${rupiah(cashOut)} dari ${data.cashFlows.length} transaksi keuangan.`,
+    `${published} konten berstatus TERBIT dengan total jangkauan ${Number(reach||0).toLocaleString('id-ID')}.`,
+    `Pekerjaan rata-rata berada di ${taskProgress}% dengan ${taskDone} pekerjaan selesai dari ${data.tasks.length} pekerjaan.`,
+    `CRM memuat ${data.donors.length} donor dengan akumulasi donasi ${rupiah(donorTotal)} dan ${followUp} item yang perlu follow-up.`,
+    `Kemitraan aktif ${partnerActive} dengan pipeline potensial ${rupiah(pipeline)}.`,
+    `Dokumentasi tercatat ${docsFiles} file dan kelengkapan absensi ${attRate}%.`
+  ];
+  const risks=[];
+  if(taskProgress<70 && data.tasks.length) risks.push(`Progress pekerjaan rata-rata ${taskProgress}%, di bawah ambang internal 70%.`);
+  if(followUp>0) risks.push(`${followUp} donor masih berstatus follow-up/perlu data.`);
+  if(attRate<80 && data.attendance.length) risks.push(`Kelengkapan absensi ${attRate}%, di bawah ambang internal 80%.`);
+  if(adminOverdue>0) risks.push(`${adminOverdue} dokumen administrasi melewati deadline dan belum selesai.`);
+  if(cashOut>cashIn && data.cashFlows.length) risks.push(`Pengeluaran tercatat lebih besar daripada pemasukan pada filter periode.`);
+  if(published===0) risks.push('Belum ada konten terbit pada filter periode/program ini.');
+  if(data.fundraising.length===0) risks.push('Belum ada transaksi fundraising pada filter periode/program ini.');
+
+  const actions=[
+    'Prioritaskan pekerjaan yang progress-nya paling rendah dan deadline paling dekat.',
+    'Tutup follow-up CRM berdasarkan tanggal follow-up, segmen donor, dan akad program.',
+    'Rekonsiliasikan fundraising dengan arus kas secara berkala supaya pemasukan tidak terlewat.',
+    'Perbarui next action dan nilai realisasi setiap ada perkembangan kemitraan.',
+    'Lengkapi check-out absensi dan hubungan Program pada Konten/Dokumentasi untuk memperkuat audit trail.'
+  ];
+
+  const text=[
+    `Periode: ${month||'Semua periode'}`,
+    `Program: ${programId ? (data.programs.find(x=>x.id===programId)?.name||programId) : 'Semua Program'}`,
+    '', 'TEMUAN UTAMA', ...observations, '', 'RISIKO / PERHATIAN', ...(risks.length?risks:['Tidak ada risiko utama yang terdeteksi dari indikator saat ini.']), '', 'REKOMENDASI', ...actions
+  ].join('\n');
+
+  return {fundraisingTotal,cashIn,cashOut,published,reach,taskDone,taskProgress,partnerActive,pipeline,donorTotal,followUp,docsFiles,attComplete,attRate,adminOverdue,programCount,observations,risks,actions,text};
+}
+
+function liveReportingTableRows(data,month){
+  const a=buildLiveAnalysis(data,month,'');
+  return `<table class="table"><thead><tr><th>Modul</th><th>Indikator</th><th>Nilai</th><th>Catatan</th></tr></thead><tbody>
+  <tr><td>Program</td><td>Jumlah program</td><td>${a.programCount}</td><td>Data live Supabase</td></tr>
+  <tr><td>Fundraising</td><td>Total penghimpunan</td><td>${rupiah(a.fundraisingTotal)}</td><td>${data.fundraising.length} transaksi</td></tr>
+  <tr><td>Keuangan</td><td>Masuk / Keluar</td><td>${rupiah(a.cashIn)} / ${rupiah(a.cashOut)}</td><td>${data.cashFlows.length} transaksi</td></tr>
+  <tr><td>Konten</td><td>Terbit / Reach</td><td>${a.published} / ${Number(a.reach).toLocaleString('id-ID')}</td><td>Data live</td></tr>
+  <tr><td>CRM</td><td>Donor / Follow-up</td><td>${data.donors.length} / ${a.followUp}</td><td>Total donasi ${rupiah(a.donorTotal)}</td></tr>
+  <tr><td>Kemitraan</td><td>Aktif / Pipeline</td><td>${a.partnerActive} / ${rupiah(a.pipeline)}</td><td>Data live</td></tr>
+  <tr><td>Dokumentasi</td><td>Jumlah file</td><td>${a.docsFiles}</td><td>${data.documents.length} record</td></tr>
+  <tr><td>Pekerjaan</td><td>Selesai / Progress</td><td>${a.taskDone} / ${a.taskProgress}%</td><td>${data.tasks.length} task</td></tr>
+  <tr><td>Absensi</td><td>Lengkap</td><td>${a.attComplete} / ${data.attendance.length}</td><td>${a.attRate}%</td></tr>
+  <tr><td>Administrasi</td><td>Overdue</td><td>${a.adminOverdue}</td><td>${data.administration.length} dokumen</td></tr>
+  </tbody></table>`;
+}
+
+function renderLiveReportingPage(){
+  const month=localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+  const programId=localStorage.getItem('sa_report_program_live')||'';
+  const d=liveReportingData;
+  const a=buildLiveAnalysis(d,month,programId);
+  const programOptions=d.programs.map(p=>`<option value="${esc(p.id)}" ${p.id===programId?'selected':''}>${esc(p.name)}</option>`).join('');
+  const recentReports=d.reports.slice(0,5).map(r=>`<tr><td><strong>${esc(r.title||r.report_code||'-')}</strong><br><small>${esc(r.report_type||'Terpadu')}</small></td><td>${esc(r.period_start||'-')} → ${esc(r.period_end||'-')}</td><td><span class="badge ${badgeClass(r.status)}">${esc(r.status||'-')}</span></td><td><button class="btn btn-secondary btn-small" onclick="loadSavedLiveReport('${esc(r.id)}')">Lihat</button></td></tr>`).join('')||`<tr><td colspan="4" class="empty">Belum ada laporan tersimpan di Supabase.</td></tr>`;
+  document.getElementById('content').innerHTML=`<div class="module-page">
+    <div class="page-head"><div><h1>Pelaporan & Analisis</h1><p>Dashboard pelaporan membaca langsung data operasional dari Supabase.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary" onclick="refreshLiveReporting()">↻ Refresh Data</button><button class="btn btn-secondary" onclick="copyLiveAIAnalysis()">Salin Analisis</button><button class="btn btn-primary" onclick="saveLiveAIReport()">Simpan Laporan</button></div></div>
+    <div class="card" style="padding:14px;margin-bottom:16px"><div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap"><div class="field" style="margin:0"><label>Periode</label><input id="liveReportMonth" type="month" value="${esc(month)}" onchange="localStorage.setItem('sa_report_month_live',this.value);refreshLiveReporting()"></div><div class="field" style="margin:0;min-width:260px"><label>Program</label><select id="liveReportProgram" onchange="localStorage.setItem('sa_report_program_live',this.value);refreshLiveReporting()"><option value="">Semua Program</option>${programOptions}</select></div><span class="badge b-green">LIVE SUPABASE</span></div></div>
+    <div class="grid kpis">
+      ${kpi('💰','Fundraising',rupiah(a.fundraisingTotal),'Live')}
+      ${kpi('💳','Arus Kas',rupiah(a.cashIn-a.cashOut),'Net')}
+      ${kpi('📋','Program',String(a.programCount),'Database')}
+      ${kpi('✅','Task Selesai',String(a.taskDone),'Live')}
+      ${kpi('🤝','Mitra Aktif',String(a.partnerActive),'Live')}
+      ${kpi('📣','Konten Terbit',String(a.published),'Live')}
+    </div>
+    <div class="grid two" style="margin-top:16px">
+      <div class="card" style="padding:16px"><div class="section-title">Rekap Live Antar Modul</div><div style="overflow-x:auto;margin-top:10px">${liveReportingTableRows(d,month)}</div></div>
+      <div class="card" style="padding:16px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div class="section-title">Analisis Cerdas</div><small style="color:var(--muted)">Indikator live + aturan analisis operasional</small></div><span class="badge b-blue">AI-READY</span></div><div style="margin-top:12px"><strong style="font-size:12px">Temuan Utama</strong><div style="display:grid;gap:7px;margin-top:7px">${a.observations.slice(0,6).map(x=>`<div style="padding:9px;border:1px solid #e7edf3;border-radius:9px;background:#fafcfe;font-size:11px">${esc(x)}</div>`).join('')}</div><strong style="display:block;font-size:12px;margin-top:12px">Risiko / Perhatian</strong><div style="display:grid;gap:7px;margin-top:7px">${(a.risks.length?a.risks:['Tidak ada risiko utama yang terdeteksi.']).map(x=>`<div style="padding:9px;border:1px solid #f0e2c9;border-radius:9px;background:#fffaf1;font-size:11px">${esc(x)}</div>`).join('')}</div></div></div>
+    </div>
+    <div class="card" style="padding:16px;margin-top:16px"><div class="section-title">Rekomendasi Tindakan</div><div style="display:grid;gap:8px;margin-top:10px">${a.actions.map(x=>`<div style="padding:9px 11px;border-left:3px solid #25b995;background:#f5fbf9;font-size:11px">${esc(x)}</div>`).join('')}</div><div style="margin-top:12px;padding:10px 12px;border-radius:9px;background:#f7f9fb;color:var(--muted);font-size:10px">Catatan: panel ini saat ini memakai analisis otomatis berbasis indikator data live. Untuk mengaktifkan model AI generatif secara aman, panggilan model sebaiknya dilakukan lewat Supabase Edge Function dan hasilnya disimpan pada field <code>reports.ai_analysis</code>.</div></div>
+    <div class="card" style="padding:16px;margin-top:16px"><div class="section-title">Laporan Tersimpan di Supabase</div><div style="overflow-x:auto;margin-top:10px"><table class="table"><thead><tr><th>Judul</th><th>Periode</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${recentReports}</tbody></table></div></div>
+  </div>`;
+}
+
+async function refreshLiveReporting(){
+  if(liveReportingBusy)return;
+  liveReportingBusy=true;
+  const month=document.getElementById('liveReportMonth')?.value||localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+  const programId=document.getElementById('liveReportProgram')?.value||localStorage.getItem('sa_report_program_live')||'';
+  localStorage.setItem('sa_report_month_live',month); localStorage.setItem('sa_report_program_live',programId);
+  try{
+    document.getElementById('content').innerHTML='<div class="card" style="padding:30px;text-align:center">⏳ Memuat data pelaporan langsung dari Supabase...</div>';
+    liveReportingData=await fetchLiveReportingData(month,programId);
+    renderLiveReportingPage();
+  }catch(err){
+    console.error('LIVE REPORT ERROR:',err);
+    toast('Gagal memuat Pelaporan dari Supabase: '+(err?.message||'Unknown error'));
+    document.getElementById('content').innerHTML=`<div class="card" style="padding:20px"><h3>Pelaporan belum termuat</h3><p style="color:var(--muted);margin-top:8px">${esc(err?.message||'Unknown error')}</p><button class="btn btn-primary" style="margin-top:12px" onclick="refreshLiveReporting()">Coba Lagi</button></div>`;
+  }finally{liveReportingBusy=false;}
+}
+
+async function copyLiveAIAnalysis(){
+  if(!liveReportingData)return;
+  const month=localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+  const programId=localStorage.getItem('sa_report_program_live')||'';
+  const a=buildLiveAnalysis(liveReportingData,month,programId);
+  try{await navigator.clipboard.writeText(a.text);toast('Analisis berhasil disalin ✅');}catch(e){toast('Analisis tersedia di panel Pelaporan.');}
+}
+
+async function saveLiveAIReport(){
+  if(!liveReportingData){toast('Data pelaporan belum siap.');return;}
+  try{
+    const session=await getSupabaseSession();
+    if(!session?.user) throw new Error('Sesi login Supabase belum aktif.');
+    const month=localStorage.getItem('sa_report_month_live')||new Date().toISOString().slice(0,7);
+    const programId=localStorage.getItem('sa_report_program_live')||null;
+    const [y,m]=String(month).split('-').map(Number);
+    const start=`${y}-${String(m).padStart(2,'0')}-01`;
+    const endDay=new Date(Date.UTC(y,m,0)).getUTCDate();
+    const end=`${y}-${String(m).padStart(2,'0')}-${String(endDay).padStart(2,'0')}`;
+    const a=buildLiveAnalysis(liveReportingData,month,programId||'');
+    const code=`RPT-${String(Date.now()).slice(-8)}`;
+    const payload={report_code:code,title:`Laporan Terpadu ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + Analisis',status:'Draft',summary:a.observations.join(' '),ai_analysis:a.text,created_by:session.user.id};
+    const {error}=await supabaseClient.from('reports').upsert(payload,{onConflict:'report_code'});
+    if(error)throw error;
+    toast('Laporan tersimpan ke Supabase ✅');
+    await refreshLiveReporting();
+  }catch(err){
+    console.error('SAVE REPORT ERROR:',err);
+    toast('Gagal menyimpan laporan: '+(err?.message||'Unknown error'));
+  }
+}
+
+async function loadSavedLiveReport(id){
+  try{
+    const r=liveReportingData?.reports?.find(x=>x.id===id);
+    if(!r) throw new Error('Laporan tidak ditemukan.');
+    document.getElementById('modalBox').innerHTML=`<h2>${esc(r.title||r.report_code||'Laporan')}</h2><div style="font-size:12px;color:var(--muted);margin-bottom:12px">${esc(r.period_start||'-')} → ${esc(r.period_end||'-')} • ${esc(r.report_type||'Terpadu')} • ${esc(r.status||'-')}</div><div class="field"><label>Summary</label><textarea rows="5" readonly>${esc(r.summary||'')}</textarea></div><div class="field" style="margin-top:10px"><label>Analisis</label><textarea rows="14" readonly>${esc(r.ai_analysis||'')}</textarea></div><div style="text-align:right;margin-top:12px"><button class="btn btn-primary" onclick="closeModal()">Tutup</button></div>`;
+    document.getElementById('modal').classList.remove('hidden');
+  }catch(err){toast(err?.message||'Laporan tidak dapat dibuka.');}
+}
+
+/* Reporting route: use live Supabase view while keeping all previous modules intact. */
+const _showPageBeforeLiveReporting = showPage;
+showPage = function(page){
+  if(page==='reporting'){
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page==='reporting'));
+    document.getElementById('topTitle').textContent='Pelaporan & Analisis';
+    document.getElementById('sidebar').classList.remove('open');
+    refreshLiveReporting();
+    return;
+  }
+  _showPageBeforeLiveReporting(page);
+};
+
+
+/* Additive live/AI insight strip on the existing Dashboard. */
+async function injectLiveDashboardInsights(){
+  try{
+    const d=await fetchLiveReportingData('', '');
+    const a=buildLiveAnalysis(d,'','');
+    const host=document.querySelector('#content .dashboard-grid') || document.querySelector('#content .welcome-row');
+    if(!host || document.getElementById('liveDashboardInsight')) return;
+    const wrap=document.createElement('div');
+    wrap.id='liveDashboardInsight';
+    wrap.className='card';
+    wrap.style.cssText='margin:0 0 12px 0;padding:14px;grid-column:1/-1;background:linear-gradient(135deg,#f7fbff,#eef8f6);border:1px solid #dcebef';
+    const topRisk=a.risks[0]||'Tidak ada risiko utama yang terdeteksi dari indikator saat ini.';
+    wrap.innerHTML=`<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><div class="section-title">📊 Live Data & Analisis Cerdas</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Ringkasan tambahan dari Supabase • ${new Date().toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'})}</div></div><span class="badge b-green">SUPABASE LIVE</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin-top:12px"><div style="padding:9px;border-radius:8px;background:#fff"><small>Fundraising</small><strong style="display:block;font-size:16px">${rupiah(a.fundraisingTotal)}</strong></div><div style="padding:9px;border-radius:8px;background:#fff"><small>Net Cash Flow</small><strong style="display:block;font-size:16px">${rupiah(a.cashIn-a.cashOut)}</strong></div><div style="padding:9px;border-radius:8px;background:#fff"><small>Task Progress</small><strong style="display:block;font-size:16px">${a.taskProgress}%</strong></div><div style="padding:9px;border-radius:8px;background:#fff"><small>Follow-up CRM</small><strong style="display:block;font-size:16px">${a.followUp}</strong></div></div><div style="margin-top:10px;padding:9px 11px;border-left:3px solid #25b995;background:#ffffff;font-size:11px"><strong>Perhatian:</strong> ${esc(topRisk)}</div><div style="margin-top:8px"><button class="btn btn-secondary btn-small" onclick="showPage('reporting')">Buka Pelaporan & Analisis →</button></div>`;
+    host.parentNode.insertBefore(wrap,host);
+  }catch(err){ console.debug('Live dashboard insight skipped:',err?.message||err); }
+}
+
+const _showPageBeforeLiveDashboard = showPage;
+showPage = function(page){
+  if(page==='dashboard'){
+    _showPageBeforeLiveDashboard(page);
+    setTimeout(injectLiveDashboardInsights,120);
+    return;
+  }
+  _showPageBeforeLiveDashboard(page);
+};
 </script>
 
 </body>
