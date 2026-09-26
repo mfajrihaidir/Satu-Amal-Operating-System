@@ -4683,8 +4683,11 @@ async function saveLiveAIReport(){
     const a=buildLiveAnalysis(liveReportingData,month,programId||'');
     const code=`RPT-${String(Date.now()).slice(-8)}`;
     const payload={report_code:code,title:`Laporan Terpadu ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + Analisis',status:'Draft',summary:a.observations.join(' '),ai_analysis:a.text,created_by:session.user.id};
-    const {error}=await supabaseClient.from('reports').upsert(payload,{onConflict:'report_code'});
-    if(error)throw error;
+    const {error}=await supabaseClient.from('reports').insert(payload);
+    if(error){
+      const detail=[error.code,error.message,error.details,error.hint].filter(Boolean).join(' | ');
+      throw new Error(detail||'Supabase gagal menyimpan laporan.');
+    }
     toast('Laporan tersimpan ke Supabase ✅');
     await refreshLiveReporting();
   }catch(err){
@@ -4947,9 +4950,15 @@ async function saveGeminiAIReport(){
       '', 'CATATAN KUALITAS DATA',...geminiListItems(a.data_quality_notes)
     ].join('\n');
     const code=`RPT-AI-${String(Date.now()).slice(-9)}`;
-    const payload={report_code:code,title:`Laporan AI Gemini ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + AI Gemini',status:'Draft',summary:String(a.executive_summary||''),ai_analysis:aiText,created_by:session.user.id};
-    const {error}=await supabaseClient.from('reports').upsert(payload,{onConflict:'report_code'});
-    if(error)throw error;
+    const payload={report_code:code,title:`Laporan AI Gemini ${month}`,period_start:start,period_end:end,program_id:programId||null,report_type:'Terpadu + AI Gemini',status:'Draft',summary:String(geminiSingleText(a.executive_summary)||''),ai_analysis:aiText,created_by:session.user.id};
+    // Untuk tombol "Simpan Hasil AI", kita memang hanya membuat laporan baru.
+    // INSERT menghindari kebutuhan policy UPDATE yang ikut terlibat pada UPSERT.
+    const {error}=await supabaseClient.from('reports').insert(payload);
+    if(error){
+      const detail=[error.code,error.message,error.details,error.hint].filter(Boolean).join(' | ');
+      console.error('SAVE GEMINI REPORT ERROR:',error);
+      throw new Error(detail||'Supabase gagal menyimpan laporan.');
+    }
     toast('Laporan AI Gemini tersimpan ke Supabase ✅');
     await refreshLiveReporting();
   }catch(err){
