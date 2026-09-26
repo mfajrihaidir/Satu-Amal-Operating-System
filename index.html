@@ -6804,7 +6804,9 @@ window.crmV2OpenTab=crmV2OpenTab;
 })();
 </script>
 
-<!-- V38 CONTENT V2 / CLEAN -->
+
+
+<!-- V38 CLEAN CONTENT V2 -->
 <style>
 /* =========================================================
    V36 — CONTENT OPERATIONS V2
@@ -6834,8 +6836,19 @@ window.crmV2OpenTab=crmV2OpenTab;
 .content-v2-sticky-note{padding:10px 12px;background:#f7fbff;border-left:3px solid #2a6f97;border-radius:8px;font-size:11px;color:#45647c}
 @media(max-width:900px){.content-v2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.content-v2-grid{grid-template-columns:1fr}}
 @media(max-width:640px){.content-v2-kpis{grid-template-columns:1fr 1fr;gap:8px}.content-v2-tab{padding:8px 11px}.content-v2-mini{padding:10px}}
-</style>
 
+.content-v2-legend{display:flex;gap:6px;flex-wrap:wrap}
+.content-cal-wrap{overflow:auto}
+.content-cal-head,.content-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));min-width:840px}
+.content-cal-head>div{padding:9px 8px;background:#f5f8fb;color:#5b7388;font-size:10px;font-weight:800;text-align:center;border:1px solid #e4edf3}
+.content-cal-cell{min-height:125px;padding:6px;border:1px solid #e7eef3;background:#fff}
+.content-cal-cell.muted{background:#fbfcfd}
+.content-cal-date{font-size:11px;font-weight:800;color:#49657d;margin-bottom:5px}
+.content-cal-item{padding:6px 7px;border-left:3px solid #2a6f97;border-radius:7px;background:#f6fbff;margin-bottom:5px;cursor:pointer}
+.content-cal-item strong{display:block;font-size:10px;color:#173f61;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.content-cal-item small{display:block;font-size:9px;color:#71869a;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){.content-cal-head,.content-cal-grid{min-width:760px}}
+</style>
 <script>
 /* =========================================================
    V36 — CONTENT OPERATIONS V2
@@ -6975,6 +6988,52 @@ function contentV2DashboardTab(){
     </div>`;
 }
 
+function contentV2CalendarTab(){
+  const now=new Date();
+  const saved=localStorage.getItem('sa_content_calendar_month')||`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const [yy,mm]=String(saved).split('-').map(Number);
+  const year=yy||now.getFullYear();
+  const month=(mm||now.getMonth()+1)-1;
+  const first=new Date(year,month,1);
+  const startDay=(first.getDay()+6)%7;
+  const days=new Date(year,month+1,0).getDate();
+  const monthLabel=new Intl.DateTimeFormat('id-ID',{month:'long',year:'numeric'}).format(first);
+  const entries={};
+  (contentV2.contents||[]).forEach(x=>{
+    if(x.content_schedule_date){
+      const d=x.content_schedule_date;
+      (entries[d] ||= []).push({type:'CONTENT',title:x.title,status:x.status,origin:x.content_origin||'PLAN PROGRAM',time:x.content_schedule_time||'',id:x.id});
+    }
+  });
+  (contentV2.posts||[]).forEach(p=>{
+    if(p.scheduled_at){
+      const dt=new Date(p.scheduled_at);
+      if(!Number.isNaN(dt.getTime())){
+        const key=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        const related=(contentV2.contents||[]).find(c=>c.id===p.content_id);
+        (entries[key] ||= []).push({type:'POST',title:related?.title||'Posting Konten',status:p.status||'TERJADWAL',origin:'POSTING',time:dt.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),id:p.content_id});
+      }
+    }
+  });
+  const prevMonth=month===0?`${year-1}-12`:`${year}-${String(month).padStart(2,'0')}`;
+  const nextMonth=month===11?`${year+1}-01`:`${year}-${String(month+2).padStart(2,'0')}`;
+  const cells=[];
+  for(let i=0;i<startDay;i++)cells.push('<div class="content-cal-cell muted"></div>');
+  for(let d=1;d<=days;d++){
+    const key=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const list=entries[key]||[];
+    cells.push(`<div class="content-cal-cell"><div class="content-cal-date">${d}</div>${list.slice(0,4).map(e=>`<div class="content-cal-item" title="${contentV2Esc(e.title)}" onclick="contentV2OpenContentModal('${contentV2Esc(e.id)}')"><strong>${e.time?contentV2Esc(e.time)+' · ':''}${contentV2Esc(e.title)}</strong><small>${contentV2Esc(e.origin)} • ${contentV2Esc(e.status)}</small></div>`).join('')}${list.length>4?`<div class="content-v2-muted">+${list.length-4} lainnya</div>`:''}</div>`);
+  }
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div><div class="section-title">Kalender Konten</div><div class="content-v2-muted">Jadwal konten dari Plan Program dan konten mandiri tim Konten. Posting terjadwal juga ikut tampil.</div></div>
+      <div style="display:flex;gap:6px;align-items:center"><button class="btn btn-secondary btn-small" onclick="localStorage.setItem('sa_content_calendar_month','${contentV2Esc(prevMonth)}');contentV2OpenTab('calendar')">←</button><strong style="font-size:13px;min-width:130px;text-align:center;text-transform:capitalize">${contentV2Esc(monthLabel)}</strong><button class="btn btn-secondary btn-small" onclick="localStorage.setItem('sa_content_calendar_month','${contentV2Esc(nextMonth)}');contentV2OpenTab('calendar')">→</button></div>
+    </div>
+    <div class="content-v2-legend" style="margin-top:10px"><span class="content-v2-chip">🟦 Dari Plan Program</span><span class="content-v2-chip">🟨 Konten Mandiri</span><span class="content-v2-chip">🟩 Posting Terjadwal</span></div>
+    <div class="content-cal-wrap" style="margin-top:10px"><div class="content-cal-head">${['Sen','Sel','Rab','Kam','Jum','Sab','Min'].map(x=>`<div>${x}</div>`).join('')}</div><div class="content-cal-grid">${cells.join('')}</div></div>
+  </div>`;
+}
+
 function contentV2PlanTab(){
   const rows=contentV2.contents||[];
   return `<div class="card">
@@ -7058,19 +7117,25 @@ function contentV2StoryOptions(selected){
 
 function contentV2OpenContentModal(id=''){
   if(!contentV2Can(id?'update':'create')) return;
-  const x=contentV2.contents.find(a=>a.id===id)||{id:'',title:'',program_plan_id:'',angle_idea:'',content_pic_id:state.user?.id||'',production_deadline:'',platform_target:'Instagram',brief:'',status:'BELUM DIMULAI',production_progress:0,production_asset_url:'',story_bank_id:'',notes:''};
+  const x=contentV2.contents.find(a=>a.id===id)||{id:'',title:'',program_plan_id:'',custom_program_name:'',content_origin:'PLAN PROGRAM',angle_idea:'',content_pic_id:state.user?.id||'',production_deadline:'',content_schedule_date:'',content_schedule_time:'',platform_target:'Instagram',brief:'',status:'BELUM DIMULAI',production_progress:0,production_asset_url:'',story_bank_id:'',notes:''};
   const picOptions=contentV2.profiles.map(p=>`<option value="${contentV2Esc(p.id)}" ${p.id===x.content_pic_id?'selected':''}>${contentV2Esc(p.full_name)} • ${contentV2Esc(p.division)}</option>`).join('');
   const typeOptions=['Foto','Video','Reels','Carousel','Story','Artikel'];
   const platformOptions=['Instagram','TikTok','Facebook','YouTube','WhatsApp','Website'];
-  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui Plan Konten':'Tambah Plan Konten'}</h2>
-    <div class="content-v2-muted" style="margin-bottom:10px">Plan Konten memakai sumber kegiatan dari Plan Program.</div>
+  const source=x.content_origin==='MANDIRI'?'MANDIRI':'PLAN PROGRAM';
+  document.getElementById('modalBox').innerHTML=`<h2>${id?'Perbarui Konten':'Tambah Plan / Jadwal Konten'}</h2>
+    <div class="content-v2-muted" style="margin-bottom:10px">Konten bisa berasal dari Plan Program atau merupakan konten mandiri tim Konten.</div>
     <div class="form-grid">
-      <div class="field full"><label>Sumber Plan Program</label><select id="cv2Plan" required>${contentV2ProgramOptions(x.program_plan_id)}</select></div>
+      <div class="field full"><label>SUMBER KONTEN</label><select id="cv2Source" onchange="contentV2ToggleSourceFields()"><option value="PLAN PROGRAM" ${source==='PLAN PROGRAM'?'selected':''}>Dari Plan Program</option><option value="MANDIRI" ${source==='MANDIRI'?'selected':''}>Konten Mandiri</option></select></div>
+      <div class="field full" id="cv2PlanWrap"><label>Sumber Plan Program</label><select id="cv2Plan">${contentV2ProgramOptions(x.program_plan_id)}<option value="">— Tidak terhubung Plan Program —</option></select></div>
+      <div class="field full" id="cv2CustomProgramWrap" style="display:${source==='MANDIRI'?'block':'none'}"><label>Program / Tema Custom (opsional)</label><input id="cv2CustomProgram" value="${contentV2Esc(x.custom_program_name||'')}" placeholder="Contoh: Edukasi Hari Kesehatan, konten internal, campaign musiman"></div>
       <div class="field"><label>Jenis Konten</label><select id="cv2Type">${typeOptions.map(v=>`<option ${v===x.content_type?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Platform Tujuan</label><select id="cv2Platform">${platformOptions.map(v=>`<option ${v===x.platform_target?'selected':''}>${v}</option>`).join('')}</select></div>
-      <div class="field full"><label>Angle / Ide Konten</label><input id="cv2Angle" value="${contentV2Esc(x.angle_idea||'')}" placeholder="Contoh: perubahan sebelum-sesudah, testimoni, human interest"></div>
+      <div class="field full"><label>Judul / Nama Konten</label><input id="cv2Title" value="${contentV2Esc(x.title||'')}" placeholder="Contoh: Tips Sedekah di Era Digital"></div>
+      <div class="field full"><label>Angle / Ide Konten</label><input id="cv2Angle" value="${contentV2Esc(x.angle_idea||'')}" placeholder="Contoh: human interest, edukasi, testimoni"></div>
       <div class="field"><label>PIC Konten</label><select id="cv2Pic">${picOptions}</select></div>
       <div class="field"><label>Deadline Produksi</label><input id="cv2Deadline" type="date" value="${contentV2Esc(x.production_deadline||'')}"></div>
+      <div class="field"><label>Jadwal Tayang</label><input id="cv2ScheduleDate" type="date" value="${contentV2Esc(x.content_schedule_date||x.publish_date||'')}"></div>
+      <div class="field"><label>Jam Tayang</label><input id="cv2ScheduleTime" type="time" value="${contentV2Esc(x.content_schedule_time||'')}"></div>
       <div class="field full"><label>Brief</label><textarea id="cv2Brief" rows="3" placeholder="Brief produksi, pesan utama, CTA, kebutuhan visual">${contentV2Esc(x.brief||'')}</textarea></div>
       <div class="field"><label>Status</label><select id="cv2Status">${['BELUM DIMULAI','PRODUKSI','REVIEW','REVISI','DISETUJUI','SIAP POSTING','TERBIT'].map(v=>`<option ${v===x.status?'selected':''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Progress Produksi (%)</label><input id="cv2Progress" type="number" min="0" max="100" value="${contentV2Percent(x.production_progress)}"></div>
@@ -7081,6 +7146,14 @@ function contentV2OpenContentModal(id=''){
     <div class="content-v2-muted" style="margin-top:7px">Batas upload 30 MB per file.</div>
     <div style="text-align:right;margin-top:12px"><button class="btn btn-secondary" onclick="closeModal()">Batal</button><button class="btn btn-primary" onclick="contentV2SaveContent('${contentV2Esc(id)}')">Simpan</button></div>`;
   document.getElementById('modal').classList.remove('hidden');
+  contentV2ToggleSourceFields();
+}
+function contentV2ToggleSourceFields(){
+  const source=document.getElementById('cv2Source')?.value||'PLAN PROGRAM';
+  const wrap=document.getElementById('cv2PlanWrap');
+  const custom=document.getElementById('cv2CustomProgramWrap');
+  if(wrap)wrap.style.display=source==='MANDIRI'?'none':'block';
+  if(custom)custom.style.display=source==='MANDIRI'?'block':'none';
 }
 
 async function contentV2UploadAsset(file, contentId){
@@ -7094,47 +7167,65 @@ async function contentV2UploadAsset(file, contentId){
 }
 async function contentV2SaveContent(id){
   if(!contentV2Can(id?'update':'create'))return;
-  const planId=document.getElementById('cv2Plan').value;
-  if(!planId){toast('Plan Program wajib dipilih.');return;}
-  const title=document.getElementById('cv2Angle').value.trim() || `Konten ${new Date().toLocaleDateString('id-ID')}`;
+  const source=document.getElementById('cv2Source').value;
+  const planId=source==='MANDIRI'?'':document.getElementById('cv2Plan').value;
+  const customProgram=source==='MANDIRI'?document.getElementById('cv2CustomProgram').value.trim():'';
+  if(source==='PLAN PROGRAM' && !planId){toast('Pilih Plan Program atau ubah Sumber Konten menjadi Konten Mandiri.');return;}
+  const title=document.getElementById('cv2Title').value.trim() || document.getElementById('cv2Angle').value.trim() || `Konten ${new Date().toLocaleDateString('id-ID')}`;
   const user=await getProgramSession();
   const existing=contentV2.contents.find(x=>x.id===id);
   try{
     let assetPath=existing?.production_asset_url||null;
     const file=document.getElementById('cv2Asset').files?.[0];
-    if(file){assetPath=await contentV2UploadAsset(file,id||('CNT-'+Date.now()));}
-    const plan=contentV2.plans.find(p=>p.id===planId);
+    const contentCode=existing?.code||('CNT-'+String(Date.now()).slice(-8));
+    if(file){assetPath=await contentV2UploadAsset(file,contentCode);}
+    const plan=planId?contentV2.plans.find(p=>p.id===planId):null;
+    const scheduleDate=document.getElementById('cv2ScheduleDate').value||null;
     const payload={
-      code:existing?.code||('CNT-'+String(Date.now()).slice(-8)),
+      code:contentCode,
       title,
       program_id:plan?.program_id||null,
-      program_plan_id:planId,
-      custom_program_name:plan?.custom_program_name||null,
+      program_plan_id:planId||null,
+      custom_program_name:source==='MANDIRI'?(customProgram||null):(plan?.custom_program_name||null),
+      content_origin:source,
       channel:document.getElementById('cv2Platform').value,
       content_type:document.getElementById('cv2Type').value,
       status:document.getElementById('cv2Status').value,
-      publish_date:null,
+      publish_date:scheduleDate,
       reach:existing?.reach||0,
       engagement:existing?.engagement||0,
-      pic_id:existing?.pic_id||document.getElementById('cv2Pic').value||user.id,
-      pic_name:contentV2.profiles.find(p=>p.id===(document.getElementById('cv2Pic').value||user.id))?.full_name||state.user?.name||'',
+      pic_id:user.id,
+      pic_name:document.getElementById('cv2Pic').selectedOptions?.[0]?.textContent?.split(' • ')[0]||state.user?.name||'',
       angle_idea:document.getElementById('cv2Angle').value.trim()||null,
       content_pic_id:document.getElementById('cv2Pic').value||user.id,
       production_deadline:document.getElementById('cv2Deadline').value||null,
-      platform_target:document.getElementById('cv2Platform').value||null,
+      content_schedule_date:scheduleDate,
+      content_schedule_time:document.getElementById('cv2ScheduleTime').value||null,
+      platform_target:document.getElementById('cv2Platform').value,
       brief:document.getElementById('cv2Brief').value.trim()||null,
       production_progress:contentV2Percent(document.getElementById('cv2Progress').value),
       production_asset_url:assetPath,
       story_bank_id:document.getElementById('cv2Story').value||null,
       notes:document.getElementById('cv2Notes').value.trim()||null
     };
-    let r;
-    if(existing) r=await supabaseClient.from('contents').update(payload).eq('id',id).select('id,code,title,program_id,program_plan_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,angle_idea,content_pic_id,production_deadline,content_schedule_date,content_schedule_time,content_origin,platform_target,brief,production_progress,production_asset_url,story_bank_id,notes,created_at,updated_at').single();
-    else r=await supabaseClient.from('contents').insert(payload).select('id,code,title,program_id,program_plan_id,custom_program_name,channel,content_type,status,publish_date,reach,engagement,pic_id,pic_name,angle_idea,content_pic_id,production_deadline,content_schedule_date,content_schedule_time,content_origin,platform_target,brief,production_progress,production_asset_url,story_bank_id,notes,created_at,updated_at').single();
-    if(r.error)throw r.error;
-    closeModal(); await syncContentV2Data(true); contentV2OpenTab('plan'); toast('Plan Konten tersimpan ✅');
-  }catch(err){console.error(err);toast('Gagal menyimpan Konten: '+(err?.message||'Unknown error'));}
+    let remote,error;
+    if(existing?.supabaseId){
+      const result=await supabaseClient.from('contents').update(payload).eq('id',existing.supabaseId).select('*').single();
+      remote=result.data;error=result.error;
+    }else{
+      const result=await supabaseClient.from('contents').insert(payload).select('*').single();
+      remote=result.data;error=result.error;
+    }
+    if(error)throw error;
+    await syncContentV2Data(true);
+    closeModal();
+    toast('Konten tersimpan di Supabase ✅');
+  }catch(err){
+    console.error('Content V2 save error',err);
+    toast('Gagal menyimpan konten: '+(err?.message||'Unknown error'));
+  }
 }
+
 async function contentV2DeleteContent(id){
   if(!contentV2Can('delete'))return toast('Hak akses tidak mengizinkan penghapusan.');
   if(!confirm('Hapus Plan Konten ini?'))return;
@@ -7266,6 +7357,5 @@ window.contentV2OpenPostModal=contentV2OpenPostModal;
 window.contentV2DeleteContent=contentV2DeleteContent;
 window.contentV2OpenAsset=contentV2OpenAsset;
 </script>
-
 </body>
 </html>
