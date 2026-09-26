@@ -7579,6 +7579,20 @@ function repV2TeamTab(d){const rows=repV2Team(d).map(x=>`<tr><td>${repV2Esc(x.na
 
 function repV2InsightTab(d){const i=repV2Insights(d);return `${repV2Filters(d)}<div class="rep-v2-grid3"><div class="rep-v2-card"><div class="rep-v2-title">Ringkasan</div><p style="margin-top:8px;font-size:12px;line-height:1.6">${repV2Esc(i.summary)}</p></div><div class="rep-v2-card"><div class="rep-v2-title">Risiko / Perhatian</div><div class="rep-v2-list">${i.risks.map(x=>`<div class="rep-v2-item rep-v2-bad">⚠️ ${repV2Esc(x)}</div>`).join('')||'<div class="rep-v2-item rep-v2-good">Tidak ada perhatian utama.</div>'}</div></div><div class="rep-v2-card"><div class="rep-v2-title">Peluang & Tindakan</div><div class="rep-v2-list">${i.opportunities.map(x=>`<div class="rep-v2-item">💡 ${repV2Esc(x)}</div>`).join('')}${i.actions.map(x=>`<div class="rep-v2-item">→ ${repV2Esc(x)}</div>`).join('')}</div></div></div>`}
 
+function reportingV2Tabs(){
+  const tabs=[
+    ['executive','Executive Dashboard'],
+    ['fundraising','Fundraising'],
+    ['crm','CRM / Donor'],
+    ['program','Program'],
+    ['content','Konten'],
+    ['partnership','Kemitraan'],
+    ['team','Kinerja Tim'],
+    ['insight','Analisis & Insight']
+  ];
+  return `<div class="rep-v2-tabs">${tabs.map(([k,l])=>`<button class="rep-v2-tab ${reportingV2.tab===k?'active':''}" onclick="reportingV2OpenTab('${k}')">${l}</button>`).join('')}</div>`;
+}
+
 function reportingV2RenderTab(data){if(reportingV2.tab==='fundraising')return repV2FundraisingTab(data);if(reportingV2.tab==='crm')return repV2CRMTab(data);if(reportingV2.tab==='program')return repV2ProgramTab(data);if(reportingV2.tab==='content')return repV2ContentTab(data);if(reportingV2.tab==='partnership')return repV2PartnershipTab(data);if(reportingV2.tab==='team')return repV2TeamTab(data);if(reportingV2.tab==='insight')return repV2InsightTab(data);return repV2Executive(data)}
 
 function reportingV2Page(){
