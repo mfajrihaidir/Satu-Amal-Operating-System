@@ -7848,6 +7848,70 @@ function repV2AttDailyStatus(row){
   if(!row.today.check_out)return {label:'Belum Check-out',cls:'rep-v2-warn',icon:'🟡'};
   return {label:'Lengkap',cls:'rep-v2-good',icon:'🟢'};
 }
+
+/* ===== PHASE 2D — REKAP KEHADIRAN & EVALUASI TIM ===== */
+function repV2AttendanceDivisionSummary(rows){
+  const map=new Map();
+  (rows||[]).forEach(r=>{
+    const key=String(r.profile?.division||'Tanpa Divisi');
+    if(!map.has(key))map.set(key,{division:key,people:0,days:0,records:0,checkin:0,complete:0});
+    const x=map.get(key);
+    x.people+=1;
+    x.days+=Number(r.days||0);
+    x.records+=Number(r.records||0);
+    x.checkin+=Number(r.checkin||0);
+    x.complete+=Number(r.complete||0);
+  });
+  return [...map.values()].map(x=>({...x,rate:x.checkin?Math.round(x.complete/x.checkin*100):0})).sort((a,b)=>a.division.localeCompare(b.division,'id'));
+}
+function repV2AttendanceExportRows(d){
+  const rows=repV2AttRows(d);
+  return rows.map(r=>({
+    nama:r.profile?.full_name||'-',
+    divisi:r.profile?.division||'-',
+    jabatan:r.profile?.job_title||'-',
+    hari_hadir:r.days,
+    record:r.records,
+    check_in:r.checkin,
+    check_out:r.checkout,
+    lengkap:r.complete,
+    kelengkapan:`${r.rate}%`,
+    tanggal_detail:reportingV2.attendanceDate||'-',
+    status_hari_ini:repV2AttDailyStatus(r).label
+  }));
+}
+function exportPhase2DAttendanceCSV(){
+  try{
+    const d=repV2Filtered(repV2ActiveData());
+    const rows=repV2AttendanceExportRows(d);
+    const header=['Nama','Divisi','Jabatan','Hari Hadir','Record','Check-in','Check-out','Lengkap','Kelengkapan','Tanggal Detail','Status Detail'];
+    const body=rows.map(r=>[r.nama,r.divisi,r.jabatan,r.hari_hadir,r.record,r.check_in,r.check_out,r.lengkap,r.kelengkapan,r.tanggal_detail,r.status_hari_ini]);
+    const csv=[header,...body].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const filename=`rekap-absensi-${reportingV2.month||'periode'}.csv`;
+    downloadFile(filename,'\ufeff'+csv,'text/csv;charset=utf-8');
+    if(typeof toast==='function')toast('Rekap absensi berhasil diekspor.');
+  }catch(err){
+    console.error('Export Phase 2D attendance',err);
+    if(typeof toast==='function')toast('Gagal export rekap: '+(err?.message||'Unknown error'));
+  }
+}
+window.exportPhase2DAttendanceCSV=exportPhase2DAttendanceCSV;
+
+function repV2AttendanceDivisionBlock(rows){
+  const summary=repV2AttendanceDivisionSummary(rows);
+  const html=summary.map(x=>`<tr>
+    <td><strong>${repV2AttEsc(x.division)}</strong></td>
+    <td>${x.people}</td><td>${x.days}</td><td>${x.records}</td><td>${x.complete}</td><td>${x.rate}%</td>
+  </tr>`).join('')||`<tr><td colspan="6" class="empty">Belum ada data rekap divisi.</td></tr>`;
+  return `<div class="rep-v2-card" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div><div class="rep-v2-title">Rekap Kehadiran per Divisi</div><div class="rep-v2-muted" style="margin-top:4px">Ringkasan periode ${repV2AttEsc(repV2MonthLabel(reportingV2.month))}. Kelengkapan = record dengan check-in dan check-out dibanding record check-in.</div></div>
+      <button type="button" class="btn btn-secondary btn-small" onclick="exportPhase2DAttendanceCSV()">⬇️ Export CSV</button>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px"><table class="table"><thead><tr><th>Divisi</th><th>Anggota</th><th>Total Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th></tr></thead><tbody>${html}</tbody></table></div>
+  </div>`;
+}
+
 function repV2AttendanceTab(d){
   const profiles=d.profiles||[];
   const divisions=repV2AttDivisions(profiles);
@@ -7911,7 +7975,8 @@ function repV2AttendanceTab(d){
       <div class="rep-v2-title">Rekap Anggota — ${repV2AttEsc(repV2MonthLabel(reportingV2.month))}</div>
       <div class="rep-v2-muted" style="margin:4px 0 10px">Hari hadir = jumlah tanggal unik yang memiliki record absensi.</div>
       <div style="overflow-x:auto"><table class="table"><thead><tr><th>Anggota</th><th>Divisi</th><th>Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th></tr></thead><tbody>${monthlyRows}</tbody></table></div>
-    </div>`;
+    </div>
+    ${repV2AttendanceDivisionBlock(rows)}`;
 }
 
 function repV2AttendancePageTab(data){
