@@ -3042,6 +3042,32 @@ attendancePage = function(){
 };
 
 /* ===== STAGE 2: REAL ATTENDANCE SYNC TO SUPABASE ===== */
+  async function uploadAttendancePhoto(userId, attendanceDate){
+  const img = document.getElementById('capturedPhoto');
+
+  if(!img?.src || !img.src.startsWith('data:image/')){
+    throw new Error('Foto verifikasi belum tersedia.');
+  }
+
+  const response = await fetch(img.src);
+  const blob = await response.blob();
+
+const safeDate = attendanceDate.replace(/-/g,'');
+const fileName = `${userId}_${Date.now()}.jpg`;
+const filePath = `${safeDate.slice(0,4)}/${safeDate.slice(4,6)}/${safeDate.slice(6,8)}/${fileName}`;
+
+  const { error: uploadError } = await supabaseClient
+    .storage
+    .from('attendance-photos')
+    .upload(filePath, blob, {
+      contentType: 'image/jpeg',
+      upsert: false
+    });
+
+  if(uploadError) throw uploadError;
+
+  return filePath;
+}
 async function syncAttendanceCheckInToSupabase(){
   if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
   const {data:{user},error:userError}=await supabaseClient.auth.getUser();
@@ -3049,12 +3075,16 @@ async function syncAttendanceCheckInToSupabase(){
   if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
 
   const attendanceDate=stage1Date();
+  const photoPath = await uploadAttendancePhoto(
+  user.id,
+  attendanceDate
+);
   const payload={
     user_id:user.id,
     attendance_date:attendanceDate,
     check_in:new Date().toISOString(),
     verification_status:'Verified',
-    verification_photo_url:null,
+    verification_photo_url:photoPath,
     notes:'Verifikasi kehadiran melalui kamera perangkat'
   };
 
