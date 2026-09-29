@@ -7561,6 +7561,7 @@ function repV2Filtered(data){
     cashFlows:data.cashFlows.filter(x=>inMonth(x.transaction_date)&&byProg(x)),
     tasks:data.tasks.filter(x=>inMonth(x.deadline||x.created_at)&&byProg(x)),
     administration:data.administration.filter(x=>inMonth(x.document_date)&&byProg(x)),
+    attendance:data.attendance.filter(x=>inMonth(x.attendance_date||x.date||x.check_in)&&(!pid||pid==='all'||!x.program_id||x.program_id===pid)),
     programs:pid&&pid!=='all'?data.programs.filter(x=>x.id===pid):data.programs,
     plans:data.plans.filter(x=>inMonth(x.activity_date)&&(!pid||pid==='all'||x.program_id===pid)),
     beneficiaries:data.beneficiaries.filter(x=>(!pid||pid==='all'||x.program_id===pid)),
@@ -7575,7 +7576,7 @@ function repV2Filtered(data){
     activities:data.activities.filter(x=>inMonth(x.activity_date)),
     proposals:data.proposals.filter(x=>inMonth(x.sent_date||x.follow_up_deadline)),
     donors:data.donors||[],
-    attendance:(data.attendance||[]).filter(x=>inMonth(x.attendance_date||x.check_in)),
+    attendance:data.attendance||[],
     profiles:data.profiles||[]
   };
 }
@@ -7671,10 +7672,13 @@ function repV2Table(headers,rows){return `<div style="overflow-x:auto"><table cl
 
 function repV2Executive(d){
   const f=repV2Fundraising(d),c=repV2CRM(d),p=repV2Program(d),ct=repV2Content(d),pa=repV2Partnership(d),team=repV2Team(d),ins=repV2Insights(d);
+  const attendanceRows=d.attendance||[];
+  const attendanceComplete=attendanceRows.filter(x=>x.check_in&&x.check_out).length;
+  const attendanceRate=attendanceRows.length?Math.round(attendanceComplete/attendanceRows.length*100):0;
   const sourceRows=Object.entries(f.bySource).map(([k,x])=>{const ach=repV2Pct(x.realization,x.target);return `<tr><td>${repV2Esc(x.name)}</td><td>${repV2Money(x.target)}</td><td>${repV2Money(x.realization)}</td><td>${ach}%</td><td>${repV2Money(Math.max(0,x.target-x.realization))}</td></tr>`}).join('');
   return `${repV2Filters(d)}<div class="rep-v2-kpis">
     ${repV2Kpi('Target Fundraising',repV2Money(f.totalTarget),'Periode terpilih')}${repV2Kpi('Realisasi Fundraising',repV2Money(f.realization),`${f.achievement}% tercapai`,f.achievement>=100?'rep-v2-good':'')}${repV2Kpi('Sisa Target',repV2Money(f.remaining),'Setelah realisasi')}${repV2Kpi('Donor',c.total,`${c.newDonor} baru • ${c.repeat} berulang • ${c.istiq} istiqomah`)}
-    ${repV2Kpi('Penerima Manfaat',repV2Money(p.real),`${repV2Money(p.target)} target • ${p.pct}% tercapai`)}${repV2Kpi('Program / Plan',`${p.programs} / ${p.plans}`,`${p.counts.running} berjalan • ${p.counts.done} selesai`)}${repV2Kpi('Konten',ct.total,`${ct.terbit} terbit • ${ct.overdue} terlambat`)}${repV2Kpi('Kemitraan',repV2Money(pa.closing),`${pa.closingCount} closing • pipeline ${repV2Money(pa.pipeline)}`)}${repV2Kpi('Absensi Tim',d.attendance.length,`${d.attendance.filter(x=>x.check_in&&x.check_out).length} lengkap • ${d.attendance.length?Math.round(d.attendance.filter(x=>x.check_in&&x.check_out).length/d.attendance.length*100):0}% kelengkapan`)}
+    ${repV2Kpi('Penerima Manfaat',repV2Money(p.real),`${repV2Money(p.target)} target • ${p.pct}% tercapai`)}${repV2Kpi('Program / Plan',`${p.programs} / ${p.plans}`,`${p.counts.running} berjalan • ${p.counts.done} selesai`)}${repV2Kpi('Konten',ct.total,`${ct.terbit} terbit • ${ct.overdue} terlambat`)}${repV2Kpi('Kemitraan',repV2Money(pa.closing),`${pa.closingCount} closing • pipeline ${repV2Money(pa.pipeline)}`)}${repV2Kpi('Absensi Tim',attendanceRows.length,`${attendanceComplete} lengkap • ${attendanceRate}% kelengkapan`)}
   </div>
   <div class="rep-v2-grid2" style="margin-top:12px"><div class="rep-v2-card"><div class="rep-v2-title">Target vs Realisasi Fundraising per Sumber</div><div style="margin-top:10px">${repV2Table(['Sumber','Target','Realisasi','Pencapaian','Sisa'],sourceRows||null)}</div></div><div class="rep-v2-card"><div class="rep-v2-title">Insight Operasional</div><div class="rep-v2-list">${ins.risks.slice(0,4).map(x=>`<div class="rep-v2-item rep-v2-bad">⚠️ ${repV2Esc(x)}</div>`).join('')||'<div class="rep-v2-item rep-v2-good">Tidak ada perhatian utama yang terdeteksi.</div>'}${ins.opportunities.slice(0,4).map(x=>`<div class="rep-v2-item">💡 ${repV2Esc(x)}</div>`).join('')}</div></div></div>
   <div class="rep-v2-card" style="margin-top:12px"><div class="rep-v2-title">Kinerja Tim — Snapshot</div><div style="margin-top:10px">${repV2Table(['PIC','Divisi','Task','Selesai','Progress','CRM Follow-up','Kemitraan','Konten'],team.slice(0,8).map(x=>`<tr><td>${repV2Esc(x.name)}</td><td>${repV2Esc(x.division)}</td><td>${x.tasks}</td><td>${x.done}</td><td>${x.avgProgress}%</td><td>${x.crm}</td><td>${x.partnership}</td><td>${x.content}</td></tr>`).join(''))}</div></div>`;
