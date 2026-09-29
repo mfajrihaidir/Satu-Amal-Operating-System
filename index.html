@@ -1781,8 +1781,27 @@ function save(){
   localStorage.setItem('sa_reports',JSON.stringify(state.reports));
   localStorage.setItem('sa_dashboard_tasks',JSON.stringify(dashboardTasks));
 }
-function todayLong(){return new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:'Asia/Jakarta'});}
-function nowTime(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Jakarta'});}
+const SA_TIMEZONE='Asia/Jakarta';
+function todayLong(){return new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:SA_TIMEZONE});}
+function nowTime(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:SA_TIMEZONE});}
+function formatWIBDateTime(value){
+  if(!value) return '-';
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString('id-ID',{timeZone:SA_TIMEZONE,day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function formatWIBTime(value){
+  if(!value) return nowTime();
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime())) return nowTime();
+  return d.toLocaleTimeString('id-ID',{timeZone:SA_TIMEZONE,hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function formatWIBDate(value){
+  if(!value) return stage1Date();
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime())) return stage1Date();
+  return new Intl.DateTimeFormat('en-CA',{timeZone:SA_TIMEZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+}
 let cameraStream = null;
 let photoVerified = false;
 
@@ -2995,11 +3014,11 @@ function stage1TodayAttendance(){
   const name=state.user?.name||'';
   return state.attendanceRecords.find(x=>x.date===d && x.name===name);
 }
-function stage1RecordCheckIn(){
+function stage1RecordCheckIn(serverTimestamp){
   if(!state.user) return;
-  const d=stage1Date();
+  const d=formatWIBDate(serverTimestamp)||stage1Date();
   const existing=stage1TodayAttendance();
-  const now=nowTime();
+  const now=formatWIBTime(serverTimestamp);
   if(existing){
     existing.checkIn=existing.checkIn||now;
     existing.status='HADIR';
@@ -3013,9 +3032,9 @@ function stage1RecordCheckIn(){
     });
   }
 }
-function stage1RecordCheckOut(){
+function stage1RecordCheckOut(serverTimestamp){
   const r=stage1TodayAttendance();
-  if(r){r.checkOut=nowTime();r.status='SELESAI';}
+  if(r){r.checkOut=formatWIBTime(serverTimestamp);r.status='SELESAI';}
 }
 function attendanceSummary(){
   const month=stage1Month(new Date().toISOString());
@@ -3041,6 +3060,8 @@ attendancePage = function(){
   <div class="card" style="padding:16px;margin-top:16px;overflow-x:auto"><div class="section-title" style="margin-bottom:10px">Riwayat Absensi Terbaru</div><table class="table"><thead><tr><th>Tanggal</th><th>Nama</th><th>Divisi</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr></thead><tbody>${history}</tbody></table></div>`;
 };
 
+/* ===== PHASE 3: SERVER TIME — WIB / ASIA-JAKARTA ===== */
+/* Supabase/PostgreSQL is the source of truth for attendance timestamps. */
 /* ===== STAGE 2: REAL ATTENDANCE SYNC TO SUPABASE ===== */
   async function uploadAttendancePhoto(userId, attendanceDate){
   const img = document.getElementById('capturedPhoto');
@@ -3074,25 +3095,20 @@ async function syncAttendanceCheckInToSupabase(){
   if(userError) throw userError;
   if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
 
-  const attendanceDate=stage1Date();
-  const photoPath = await uploadAttendancePhoto(
-  user.id,
-  attendanceDate
-);
-  const payload={
-    user_id:user.id,
-    attendance_date:attendanceDate,
-    check_in:new Date().toISOString(),
-    verification_status:'Verified',
-    verification_photo_url:photoPath,
-    notes:'Verifikasi kehadiran melalui kamera perangkat'
-  };
-
-  const {error}=await supabaseClient
-    .from('attendance')
-    .upsert(payload,{onConflict:'user_id,attendance_date'});
+  /*
+   * Phase 3: tanggal dan timestamp absensi ditentukan oleh PostgreSQL server.
+   * Database memakai now() lalu aplikasi menampilkan timestamp tersebut sebagai WIB.
+   */
+  const clientDate=stage1Date();
+  const photoPath = await uploadAttendancePhoto(user.id,clientDate);
+  const {data,error}=await supabaseClient.rpc('record_attendance_checkin',{
+    p_photo_path:photoPath,
+    p_notes:'Verifikasi kehadiran melalui kamera perangkat'
+  });
   if(error) throw error;
-  return {userId:user.id,attendanceDate};
+  const record=Array.isArray(data)?data[0]:data;
+  if(!record) throw new Error('Server tidak mengembalikan record absensi.');
+  return {userId:user.id,attendanceDate:record.attendance_date,serverTimestamp:record.check_in,record};
 }
 
 async function syncAttendanceCheckOutToSupabase(){
@@ -3101,24 +3117,18 @@ async function syncAttendanceCheckOutToSupabase(){
   if(userError) throw userError;
   if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
 
-  const {data,error}=await supabaseClient
-    .from('attendance')
-    .update({check_out:new Date().toISOString()})
-    .eq('user_id',user.id)
-    .eq('attendance_date',stage1Date())
-    .select('id')
-    .maybeSingle();
-
+  const {data,error}=await supabaseClient.rpc('record_attendance_checkout');
   if(error) throw error;
-  if(!data) throw new Error('Record absensi hari ini belum ditemukan di Supabase.');
-  return data;
+  const record=Array.isArray(data)?data[0]:data;
+  if(!record) throw new Error('Record absensi hari ini belum ditemukan di Supabase.');
+  return {userId:user.id,attendanceDate:record.attendance_date,serverTimestamp:record.check_out,record};
 }
 
 /* Override attendance actions: Supabase is the source of truth, local Stage 1 is kept as a mirror. */
 checkOut = async function(){
   try{
-    await syncAttendanceCheckOutToSupabase();
-    stage1RecordCheckOut();
+    const result=await syncAttendanceCheckOutToSupabase();
+    stage1RecordCheckOut(result.serverTimestamp);
     state.checkedIn=false;
     localStorage.removeItem('sa_checkin_time');
     save();
@@ -3140,12 +3150,12 @@ confirmAttendance = async function(){
   button.disabled=true;
   button.textContent='MENYIMPAN ABSENSI...';
   try{
-    await syncAttendanceCheckInToSupabase();
+    const result=await syncAttendanceCheckInToSupabase();
     state.checkedIn=true;
-    localStorage.setItem('sa_checkin_time',nowTime());
+    localStorage.setItem('sa_checkin_time',formatWIBTime(result.serverTimestamp));
     localStorage.setItem('sa_attendance_photo','verified');
-    localStorage.setItem('sa_attendance_date',stage1Date());
-    stage1RecordCheckIn();
+    localStorage.setItem('sa_attendance_date',result.attendanceDate);
+    stage1RecordCheckIn(result.serverTimestamp);
     save();
     stopCamera();
     document.getElementById('verificationScreen').classList.add('hidden');
@@ -7766,542 +7776,6 @@ window.reportingV2OpenTab=reportingV2OpenTab;
 window.reportingV2ApplyFilters=reportingV2ApplyFilters;
 window.downloadReportingV2CSV=downloadReportingV2CSV;
 
-</script>
-
-
-
-<script id="reporting-phase-2c">
-/* =========================================================
-   PHASE 2C — DETAIL & MONITORING ABSENSI
-   Tidak mengubah mekanisme absensi/Supabase existing.
-   Menambah monitoring berbasis data attendance + profiles.
-   ========================================================= */
-reportingV2.attendanceDivision = reportingV2.attendanceDivision || '';
-reportingV2.attendanceDate = reportingV2.attendanceDate || new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Jakarta'});
-
-function repV2AttTodayWIB(){
-  return new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Jakarta'});
-}
-function repV2AttEsc(v){return typeof repV2Esc==='function'?repV2Esc(v):esc(v??'');}
-function repV2AttTime(v){
-  if(!v)return '-';
-  const s=String(v);
-  const m=s.match(/T?(\d{2}:\d{2})/);
-  return m?m[1]:s.slice(0,5);
-}
-function repV2AttMonthStart(month){return `${month}-01`;}
-function repV2AttMonthEnd(month){
-  const [y,m]=String(month).split('-').map(Number);
-  return new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
-}
-function repV2AttDateInMonth(date,month){return String(date||'').slice(0,7)===String(month||'').slice(0,7);}
-function repV2AttProfileMap(profiles){
-  return new Map((profiles||[]).map(p=>[String(p.id),p]));
-}
-function repV2AttDivisions(profiles){
-  return [...new Set((profiles||[]).map(p=>String(p.division||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'id'));
-}
-function repV2AttRows(d){
-  const profiles=d.profiles||[];
-  const attendance=d.attendance||[];
-  const month=reportingV2.month;
-  const division=reportingV2.attendanceDivision||'';
-  const map=repV2AttProfileMap(profiles);
-  const rows=[];
-  const grouped=new Map();
-
-  attendance.filter(a=>repV2AttDateInMonth(a.attendance_date,month)).forEach(a=>{
-    const uid=String(a.user_id||'');
-    const p=map.get(uid);
-    if(division && String(p?.division||'').trim().toLowerCase()!==String(division).trim().toLowerCase())return;
-    if(!grouped.has(uid))grouped.set(uid,{profile:p||{id:uid,full_name:'User tidak ditemukan',division:'-'},records:[]});
-    grouped.get(uid).records.push(a);
-  });
-
-  profiles.forEach(p=>{
-    if(division && String(p.division||'').trim().toLowerCase()!==String(division).trim().toLowerCase())return;
-    const uid=String(p.id||'');
-    if(!grouped.has(uid))grouped.set(uid,{profile:p,records:[]});
-  });
-
-  grouped.forEach(g=>{
-    const records=g.records;
-    const dates=new Set(records.map(x=>String(x.attendance_date||'').slice(0,10)).filter(Boolean));
-    const complete=records.filter(x=>x.check_in&&x.check_out).length;
-    const checkin=records.filter(x=>x.check_in).length;
-    const checkout=records.filter(x=>x.check_out).length;
-    rows.push({
-      profile:g.profile,
-      records:records.length,
-      days:dates.size,
-      checkin,
-      checkout,
-      complete,
-      rate:checkin?Math.round((complete/checkin)*100):0,
-      today:records.find(x=>String(x.attendance_date||'').slice(0,10)===reportingV2.attendanceDate)||null
-    });
-  });
-  return rows.sort((a,b)=>String(a.profile.full_name||'').localeCompare(String(b.profile.full_name||''),'id'));
-}
-function repV2AttDailyStatus(row){
-  if(!row?.today?.check_in)return {label:'Belum Check-in',cls:'rep-v2-bad',icon:'🔴'};
-  if(!row.today.check_out)return {label:'Belum Check-out',cls:'rep-v2-warn',icon:'🟡'};
-  return {label:'Lengkap',cls:'rep-v2-good',icon:'🟢'};
-}
-
-/* ===== PHASE 2D — REKAP KEHADIRAN & EVALUASI TIM ===== */
-function repV2AttendanceDivisionSummary(rows){
-  const map=new Map();
-  (rows||[]).forEach(r=>{
-    const key=String(r.profile?.division||'Tanpa Divisi');
-    if(!map.has(key))map.set(key,{division:key,people:0,days:0,records:0,checkin:0,complete:0});
-    const x=map.get(key);
-    x.people+=1;
-    x.days+=Number(r.days||0);
-    x.records+=Number(r.records||0);
-    x.checkin+=Number(r.checkin||0);
-    x.complete+=Number(r.complete||0);
-  });
-  return [...map.values()].map(x=>({...x,rate:x.checkin?Math.round(x.complete/x.checkin*100):0})).sort((a,b)=>a.division.localeCompare(b.division,'id'));
-}
-function repV2AttendanceExportRows(d){
-  const rows=repV2AttRows(d);
-  return rows.map(r=>({
-    nama:r.profile?.full_name||'-',
-    divisi:r.profile?.division||'-',
-    jabatan:r.profile?.job_title||'-',
-    hari_hadir:r.days,
-    record:r.records,
-    check_in:r.checkin,
-    check_out:r.checkout,
-    lengkap:r.complete,
-    kelengkapan:`${r.rate}%`,
-    tanggal_detail:reportingV2.attendanceDate||'-',
-    status_hari_ini:repV2AttDailyStatus(r).label
-  }));
-}
-function exportPhase2DAttendanceCSV(){
-  try{
-    const d=repV2Filtered(repV2ActiveData());
-    const rows=repV2AttendanceExportRows(d);
-    const header=['Nama','Divisi','Jabatan','Hari Hadir','Record','Check-in','Check-out','Lengkap','Kelengkapan','Tanggal Detail','Status Detail'];
-    const body=rows.map(r=>[r.nama,r.divisi,r.jabatan,r.hari_hadir,r.record,r.check_in,r.check_out,r.lengkap,r.kelengkapan,r.tanggal_detail,r.status_hari_ini]);
-    const csv=[header,...body].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-    const filename=`rekap-absensi-${reportingV2.month||'periode'}.csv`;
-    downloadFile(filename,'\ufeff'+csv,'text/csv;charset=utf-8');
-    if(typeof toast==='function')toast('Rekap absensi berhasil diekspor.');
-  }catch(err){
-    console.error('Export Phase 2D attendance',err);
-    if(typeof toast==='function')toast('Gagal export rekap: '+(err?.message||'Unknown error'));
-  }
-}
-window.exportPhase2DAttendanceCSV=exportPhase2DAttendanceCSV;
-
-function repV2AttendanceDivisionBlock(rows){
-  const summary=repV2AttendanceDivisionSummary(rows);
-  const html=summary.map(x=>`<tr>
-    <td><strong>${repV2AttEsc(x.division)}</strong></td>
-    <td>${x.people}</td><td>${x.days}</td><td>${x.records}</td><td>${x.complete}</td><td>${x.rate}%</td>
-  </tr>`).join('')||`<tr><td colspan="6" class="empty">Belum ada data rekap divisi.</td></tr>`;
-  return `<div class="rep-v2-card" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <div><div class="rep-v2-title">Rekap Kehadiran per Divisi</div><div class="rep-v2-muted" style="margin-top:4px">Ringkasan periode ${repV2AttEsc(repV2MonthLabel(reportingV2.month))}. Kelengkapan = record dengan check-in dan check-out dibanding record check-in.</div></div>
-      <button type="button" class="btn btn-secondary btn-small" onclick="exportPhase2DAttendanceCSV()">⬇️ Export CSV</button>
-    </div>
-    <div style="overflow-x:auto;margin-top:10px"><table class="table"><thead><tr><th>Divisi</th><th>Anggota</th><th>Total Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th></tr></thead><tbody>${html}</tbody></table></div>
-  </div>`;
-}
-
-function repV2AttendanceTab(d){
-  const profiles=d.profiles||[];
-  const divisions=repV2AttDivisions(profiles);
-  if(!repV2AttDateInMonth(reportingV2.attendanceDate,reportingV2.month)){
-    reportingV2.attendanceDate=repV2AttMonthStart(reportingV2.month);
-  }
-  const rows=repV2AttRows(d);
-  const selectedDate=reportingV2.attendanceDate;
-  const selectedDivision=reportingV2.attendanceDivision||'';
-
-  const complete=rows.reduce((n,r)=>n+r.complete,0);
-  const checkins=rows.reduce((n,r)=>n+r.checkin,0);
-  const activePeople=rows.length;
-  const dailyRows=rows.map(r=>{
-    const st=repV2AttDailyStatus(r);
-    const t=r.today;
-    return `<tr>
-      <td><strong>${repV2AttEsc(r.profile.full_name||'-')}</strong><div class="rep-v2-muted">${repV2AttEsc(r.profile.job_title||'')}</div></td>
-      <td>${repV2AttEsc(r.profile.division||'-')}</td>
-      <td>${repV2AttTime(t?.check_in)}</td>
-      <td>${repV2AttTime(t?.check_out)}</td>
-      <td><span class="${st.cls}">${st.icon} ${st.label}</span></td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="5" class="empty">Belum ada anggota pada filter ini.</td></tr>`;
-
-  const monthlyRows=rows.map(r=>`<tr>
-    <td><strong>${repV2AttEsc(r.profile.full_name||'-')}</strong></td>
-    <td>${repV2AttEsc(r.profile.division||'-')}</td>
-    <td>${r.days}</td>
-    <td>${r.records}</td>
-    <td>${r.complete}</td>
-    <td>${r.rate}%</td>
-  </tr>`).join('') || `<tr><td colspan="6" class="empty">Belum ada data absensi.</td></tr>`;
-
-  const dateLabel=repV2Date(reportingV2.attendanceDate);
-  return `
-    <div class="rep-v2-card" style="margin-bottom:12px">
-      <div class="rep-v2-title">Filter Monitoring Absensi</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:end">
-        <div class="field rep-v2-filter"><label>Bulan</label><input id="repV2AttMonth" type="month" value="${repV2AttEsc(reportingV2.month)}" onchange="repV2AttendanceChangeMonth(this.value)"></div>
-        <div class="field rep-v2-filter"><label>Tanggal Detail</label><input id="repV2AttDate" type="date" value="${repV2AttEsc(reportingV2.attendanceDate)}" onchange="repV2AttendanceChangeDate(this.value)"></div>
-        <div class="field rep-v2-filter"><label>Divisi</label><select id="repV2AttDivision" onchange="repV2AttendanceChangeDivision(this.value)"><option value="">Semua Divisi</option>${divisions.map(v=>`<option value="${repV2AttEsc(v)}" ${selectedDivision===v?'selected':''}>${repV2AttEsc(v)}</option>`).join('')}</select></div>
-      </div>
-      <div class="rep-v2-muted" style="margin-top:8px">Detail harian: ${repV2AttEsc(dateLabel)} · Periode bulanan: ${repV2AttEsc(repV2MonthLabel(reportingV2.month))}</div>
-    </div>
-
-    <div class="rep-v2-kpis" style="margin-bottom:12px">
-      <div class="rep-v2-kpi"><small>Anggota Terpantau</small><strong>${activePeople}</strong><span class="rep-v2-muted">sesuai filter</span></div>
-      <div class="rep-v2-kpi"><small>Record Absensi</small><strong>${rows.reduce((n,r)=>n+r.records,0)}</strong><span class="rep-v2-muted">bulan terpilih</span></div>
-      <div class="rep-v2-kpi"><small>Check-in</small><strong>${checkins}</strong><span class="rep-v2-muted">record masuk</span></div>
-      <div class="rep-v2-kpi"><small>Check-in Lengkap</small><strong>${complete}</strong><span class="rep-v2-muted">dengan check-out</span></div>
-    </div>
-
-    <div class="rep-v2-card" style="margin-bottom:12px">
-      <div class="rep-v2-title">Status ${repV2AttEsc(dateLabel)}</div>
-      <div class="rep-v2-muted" style="margin:4px 0 10px">🟢 Lengkap · 🟡 Belum check-out · 🔴 Belum check-in</div>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Anggota</th><th>Divisi</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr></thead><tbody>${dailyRows}</tbody></table></div>
-    </div>
-
-    <div class="rep-v2-card">
-      <div class="rep-v2-title">Rekap Anggota — ${repV2AttEsc(repV2MonthLabel(reportingV2.month))}</div>
-      <div class="rep-v2-muted" style="margin:4px 0 10px">Hari hadir = jumlah tanggal unik yang memiliki record absensi.</div>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Anggota</th><th>Divisi</th><th>Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th></tr></thead><tbody>${monthlyRows}</tbody></table></div>
-    </div>
-    ${repV2AttendanceDivisionBlock(rows)}`;
-}
-
-function repV2AttendancePageTab(data){
-  return repV2AttendanceTab(data);
-}
-
-function repV2AttendanceRerender(){
-  const el=document.getElementById('content');
-  if(el && document.getElementById('topTitle')?.textContent==='Pelaporan & Analisis'){
-    el.innerHTML=reportingV2Page();
-    setTimeout(()=>{ensureReportingV2GeminiBlock();applyV25PermissionUI()},0);
-  }
-}
-function repV2AttendanceSafeDateForMonth(month,date){
-  return repV2AttDateInMonth(date,month)?date:repV2AttMonthStart(month);
-}
-function repV2AttendanceChangeMonth(v){
-  if(!v)return;
-  reportingV2.month=v;
-  reportingV2.attendanceDate=repV2AttendanceSafeDateForMonth(v,reportingV2.attendanceDate);
-  localStorage.setItem('sa_report_month_live',v);
-  localStorage.setItem('sa_report_attendance_date',reportingV2.attendanceDate);
-  refreshLiveReporting();
-}
-function repV2AttendanceChangeDate(v){
-  if(!v)return;
-  reportingV2.attendanceDate=repV2AttendanceSafeDateForMonth(reportingV2.month,v);
-  localStorage.setItem('sa_report_attendance_date',reportingV2.attendanceDate);
-  repV2AttendanceRerender();
-}
-function repV2AttendanceChangeDivision(v){
-  /* PHASE 2D FIX — apply division filter immediately and rerender only
-     the active attendance report. */
-  reportingV2.attendanceDivision=String(v||'').trim();
-  localStorage.setItem('sa_report_attendance_division',reportingV2.attendanceDivision);
-
-  try{
-    reportingV2.tab='attendance';
-    const el=document.getElementById('content');
-    if(!el) throw new Error('Container Pelaporan tidak ditemukan.');
-
-    const data=repV2Filtered(repV2ActiveData());
-    const divisionKey=String(reportingV2.attendanceDivision||'').trim().toLowerCase();
-
-    const renderer=(typeof repV2AttendanceTab==='function')
-      ? repV2AttendanceTab
-      : ((typeof repV2AttendancePageTab==='function') ? repV2AttendancePageTab : null);
-    if(!renderer) throw new Error('Renderer absensi belum termuat.');
-
-    el.innerHTML=renderer(data);
-
-    const select=document.getElementById('repV2AttDivision');
-    if(select){
-      const matched=[...select.options].find(o=>
-        String(o.value||'').trim().toLowerCase()===divisionKey
-      );
-      select.value=matched ? matched.value : '';
-    }
-
-    document.querySelectorAll('.rep-v2-tab').forEach(b=>
-      b.classList.toggle('active',b.textContent.trim()==='Absensi Tim')
-    );
-  }catch(err){
-    console.error('Phase 2D division filter error:',err);
-    if(typeof toast==='function')toast('Filter divisi gagal: '+(err?.message||'Unknown error'));
-  }
-}
-
-/* Add the new tab without touching the existing reporting modules. */
-(function initPhase2CAttendance(){
-  reportingV2.attendanceDivision=localStorage.getItem('sa_report_attendance_division')||reportingV2.attendanceDivision||'';
-  reportingV2.attendanceDate=localStorage.getItem('sa_report_attendance_date')||reportingV2.attendanceDate||repV2AttTodayWIB();
-  const baseTabs=reportingV2Tabs;
-  reportingV2Tabs=function(){
-    const tabs=[
-      ['executive','Executive Dashboard'],['attendance','Absensi Tim'],['fundraising','Fundraising'],['crm','CRM / Donor'],['program','Program'],['content','Konten'],['partnership','Kemitraan'],['team','Kinerja Tim'],['insight','Analisis & Insight']
-    ];
-    return `<div class="rep-v2-tabs">${tabs.map(([k,l])=>`<button type="button" class="rep-v2-tab ${reportingV2.tab===k?'active':''}" onclick="${k==='attendance'?'openPhase2CAttendance()':`reportingV2OpenTab('${k}')` }">${l}</button>`).join('')}</div>`;
-  };
-  const baseRender=reportingV2RenderTab;
-  reportingV2RenderTab=function(data){
-    if(reportingV2.tab==='attendance')return reportingV2AttendancePageTab(data);
-    return baseRender(data);
-  };
-})();
-
-/* Direct attendance-tab handler: bypasses the older generic tab renderer. */
-function openPhase2CAttendance(){
-  try{
-    reportingV2.tab='attendance';
-    const el=document.getElementById('content');
-    if(!el)throw new Error('Container Pelaporan tidak ditemukan.');
-    const data=repV2Filtered(repV2ActiveData());
-    /* FIX 3: do not depend on the optional page-wrapper function. */
-    const renderer = (typeof repV2AttendancePageTab === 'function')
-      ? repV2AttendancePageTab
-      : ((typeof repV2AttendanceTab === 'function') ? repV2AttendanceTab : null);
-    if(!renderer) throw new Error('Renderer absensi Phase 2C belum termuat.');
-    el.innerHTML=renderer(data);
-    document.querySelectorAll('.rep-v2-tab').forEach(b=>b.classList.toggle('active',b.textContent.trim()==='Absensi Tim'));
-  }catch(err){
-    console.error('Phase 2C attendance render error:',err);
-    if(typeof toast==='function')toast('Absensi gagal dibuka: '+(err?.message||'Unknown error'));
-  }
-}
-window.openPhase2CAttendance=openPhase2CAttendance;
-
-/* Public helpers for inline buttons/inputs. */
-window.repV2AttendanceChangeMonth=repV2AttendanceChangeMonth;
-window.repV2AttendanceChangeDate=repV2AttendanceChangeDate;
-window.repV2AttendanceChangeDivision=repV2AttendanceChangeDivision;
-</script>
-
-<script id="phase-2e-attendance-detail">
-/* =========================================================
-   PHASE 2E — DETAIL RIWAYAT ABSENSI PER ANGGOTA
-   Dibangun di atas Phase 2D tanpa mengubah alur check-in/out.
-   ========================================================= */
-function phase2EEsc(v){
-  return typeof repV2AttEsc==='function' ? repV2AttEsc(v) : String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-function phase2ETime(v){
-  return typeof repV2AttTime==='function' ? repV2AttTime(v) : (v ? String(v).slice(0,5) : '-');
-}
-function phase2ERecordsForUser(userId){
-  const month=reportingV2.month;
-  return (repV2ActiveData().attendance||[])
-    .filter(a=>String(a.user_id||'')===String(userId||'') && String(a.attendance_date||'').slice(0,7)===String(month||'').slice(0,7))
-    .sort((a,b)=>String(b.attendance_date||'').localeCompare(String(a.attendance_date||'')));
-}
-function phase2EMemberProfile(userId){
-  return (repV2ActiveData().profiles||[]).find(p=>String(p.id||'')===String(userId||''))||null;
-}
-function phase2EMemberStats(records){
-  const days=new Set(records.map(r=>String(r.attendance_date||'').slice(0,10)).filter(Boolean)).size;
-  const checkin=records.filter(r=>r.check_in).length;
-  const checkout=records.filter(r=>r.check_out).length;
-  const complete=records.filter(r=>r.check_in&&r.check_out).length;
-  return {days,records:records.length,checkin,checkout,complete,rate:checkin?Math.round(complete/checkin*100):0};
-}
-function phase2EStatus(r){
-  if(!r?.check_in)return {label:'Belum Check-in',icon:'🔴',cls:'rep-v2-bad'};
-  if(!r?.check_out)return {label:'Belum Check-out',icon:'🟡',cls:'rep-v2-warn'};
-  return {label:'Lengkap',icon:'🟢',cls:'rep-v2-good'};
-}
-function phase2EMemberDetail(userId){
-  const profile=phase2EMemberProfile(userId);
-  if(!profile){if(typeof toast==='function')toast('Profil anggota tidak ditemukan.');return;}
-  const records=phase2ERecordsForUser(userId);
-  const st=phase2EMemberStats(records);
-  const rows=records.map(r=>{
-    const status=phase2EStatus(r);
-    return `<tr>
-      <td>${phase2EEsc(repV2Date(r.attendance_date))}</td>
-      <td>${phase2ETime(r.check_in)}</td>
-      <td>${phase2ETime(r.check_out)}</td>
-      <td><span class="${status.cls}">${status.icon} ${status.label}</span></td>
-      <td>${phase2EEsc(r.verification_status||'-')}</td>
-    </tr>`;
-  }).join('')||`<tr><td colspan="5" class="empty">Belum ada riwayat absensi pada periode ini.</td></tr>`;
-
-  const todayRecord=records.find(r=>String(r.attendance_date||'').slice(0,10)===String(reportingV2.attendanceDate||''));
-  const todayStatus=phase2EStatus(todayRecord);
-  const html=`
-    <div class="page-head">
-      <div>
-        <h1>Detail Absensi Anggota</h1>
-        <p>Riwayat absensi ${phase2EEsc(repV2MonthLabel(reportingV2.month))} berdasarkan data Supabase.</p>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="btn btn-secondary btn-small" onclick="openPhase2CAttendance()">← Kembali ke Absensi</button>
-        <button type="button" class="btn btn-secondary btn-small" onclick="phase2EExportMemberCSV('${phase2EEsc(userId)}')">⬇️ Export CSV</button>
-      </div>
-    </div>
-
-    <div class="rep-v2-card" style="margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-        <div>
-          <div class="rep-v2-title" style="font-size:16px">${phase2EEsc(profile.full_name||'-')}</div>
-          <div class="rep-v2-muted" style="margin-top:5px">${phase2EEsc(profile.division||'-')} · ${phase2EEsc(profile.job_title||profile.role||'-')}</div>
-        </div>
-        <div><span class="${todayStatus.cls}">${todayStatus.icon} ${todayStatus.label}</span></div>
-      </div>
-    </div>
-
-    <div class="rep-v2-kpis" style="margin-bottom:12px">
-      <div class="rep-v2-kpi"><small>Hari Hadir</small><strong>${st.days}</strong><span class="rep-v2-muted">tanggal unik</span></div>
-      <div class="rep-v2-kpi"><small>Record</small><strong>${st.records}</strong><span class="rep-v2-muted">periode terpilih</span></div>
-      <div class="rep-v2-kpi"><small>Lengkap</small><strong>${st.complete}</strong><span class="rep-v2-muted">check-in + check-out</span></div>
-      <div class="rep-v2-kpi"><small>Kelengkapan</small><strong>${st.rate}%</strong><span class="rep-v2-muted">dari check-in</span></div>
-    </div>
-
-    <div class="rep-v2-card">
-      <div class="rep-v2-title">Riwayat Harian</div>
-      <div class="rep-v2-muted" style="margin:4px 0 10px">Periode ${phase2EEsc(repV2MonthLabel(reportingV2.month))}</div>
-      <div style="overflow-x:auto"><table class="table">
-        <thead><tr><th>Tanggal</th><th>Check-in</th><th>Check-out</th><th>Status</th><th>Verifikasi</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-    </div>`;
-
-  const el=document.getElementById('content');
-  if(!el) return;
-  el.innerHTML=html;
-  document.querySelectorAll('.rep-v2-tab').forEach(b=>b.classList.remove('active'));
-}
-function phase2EExportMemberCSV(userId){
-  const profile=phase2EMemberProfile(userId);
-  const records=phase2ERecordsForUser(userId);
-  if(!profile){if(typeof toast==='function')toast('Profil anggota tidak ditemukan.');return;}
-  const rows=[['Nama','Divisi','Jabatan','Tanggal','Check-in','Check-out','Status','Verifikasi']];
-  records.forEach(r=>{
-    const st=phase2EStatus(r);
-    rows.push([profile.full_name||'-',profile.division||'-',profile.job_title||profile.role||'-',repV2Date(r.attendance_date),phase2ETime(r.check_in),phase2ETime(r.check_out),st.label,r.verification_status||'-']);
-  });
-  const csv=rows.map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  downloadFile(`detail-absensi-${String(profile.full_name||'anggota').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')}-${reportingV2.month}.csv`,'\ufeff'+csv,'text/csv;charset=utf-8');
-  if(typeof toast==='function')toast('Detail absensi berhasil diekspor.');
-}
-window.phase2EMemberDetail=phase2EMemberDetail;
-window.phase2EExportMemberCSV=phase2EExportMemberCSV;
-
-/* Tambahkan tombol Detail ke tabel anggota Phase 2D tanpa mengganti renderer utamanya. */
-const _phase2EBaseAttendanceTab=repV2AttendanceTab;
-repV2AttendanceTab=function(d){
-  const base=_phase2EBaseAttendanceTab(d);
-  const rows=repV2AttRows(d);
-  const detailRows=rows.map(r=>{
-    const uid=String(r.profile?.id||'');
-    return `<tr>
-      <td><strong>${phase2EEsc(r.profile?.full_name||'-')}</strong></td>
-      <td>${phase2EEsc(r.profile?.division||'-')}</td>
-      <td>${r.days}</td><td>${r.records}</td><td>${r.complete}</td><td>${r.rate}%</td>
-      <td><button type="button" class="btn btn-secondary btn-small" onclick="phase2EMemberDetail('${phase2EEsc(uid)}')">Detail</button></td>
-    </tr>`;
-  }).join('')||`<tr><td colspan="7" class="empty">Belum ada anggota pada filter ini.</td></tr>`;
-  const detailBlock=`<div class="rep-v2-card" style="margin-top:12px">
-    <div class="rep-v2-title">Detail Anggota</div>
-    <div class="rep-v2-muted" style="margin:4px 0 10px">Buka riwayat absensi lengkap per anggota pada periode yang sedang dipilih.</div>
-    <div style="overflow-x:auto"><table class="table"><thead><tr><th>Anggota</th><th>Divisi</th><th>Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th><th>Aksi</th></tr></thead><tbody>${detailRows}</tbody></table></div>
-  </div>`;
-  return base+detailBlock;
-};
-window.repV2AttendanceTab=repV2AttendanceTab;
-
-/* Pastikan wrapper Phase 2C/2D memakai renderer terbaru. */
-if(typeof reportingV2AttendancePageTab==='function'){
-  reportingV2AttendancePageTab=function(data){return repV2AttendanceTab(data);};
-}
-</script>
-
-<script id="phase-2f-attendance-trend">
-/* =========================================================
-   PHASE 2F — TREN KEHADIRAN 6 BULAN
-   Hanya membaca data attendance + profiles dari reportingV2.
-   Tidak mengubah login, check-in/out, atau struktur Supabase.
-   ========================================================= */
-function phase2FMonthKey(offset){
-  const base=String(reportingV2?.month||new Date().toISOString().slice(0,7)).slice(0,7);
-  const [y,m]=base.split('-').map(Number);
-  const d=new Date(Date.UTC(y,m-1+offset,1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-}
-function phase2FMonthLabel(key){
-  try{return new Date(`${key}-01T00:00:00Z`).toLocaleDateString('id-ID',{month:'short',year:'numeric',timeZone:'UTC'});}catch(e){return key;}
-}
-function phase2FTrendRows(data){
-  const selectedDivision=String(reportingV2?.attendanceDivision||'').trim().toLowerCase();
-  const profiles=(data.profiles||[]).filter(p=>!selectedDivision || String(p.division||'').trim().toLowerCase()===selectedDivision);
-  const ids=new Set(profiles.map(p=>String(p.id||'')));
-  const att=(data.attendance||[]).filter(a=>ids.has(String(a.user_id||'')));
-  const months=Array.from({length:6},(_,i)=>phase2FMonthKey(i-5));
-  return months.map(month=>{
-    const rows=att.filter(a=>String(a.attendance_date||'').slice(0,7)===month);
-    const checkin=rows.filter(a=>a.check_in).length;
-    const complete=rows.filter(a=>a.check_in&&a.check_out).length;
-    const people=new Set(rows.filter(a=>a.check_in).map(a=>String(a.user_id||''))).size;
-    return {month,people,records:rows.length,checkin,complete,rate:checkin?Math.round(complete/checkin*100):0};
-  });
-}
-function phase2FTrendBlock(data){
-  const rows=phase2FTrendRows(data);
-  const avg=rows.length?Math.round(rows.reduce((s,r)=>s+r.rate,0)/rows.length):0;
-  const current=rows[rows.length-1]||{rate:0,records:0,people:0};
-  const previous=rows[rows.length-2]||{rate:0,records:0,people:0};
-  const delta=current.rate-previous.rate;
-  const max=Math.max(1,...rows.map(r=>r.records));
-  const bars=rows.map(r=>{
-    const h=Math.max(4,Math.round(r.records/max*100));
-    return `<div style="flex:1;min-width:55px;text-align:center">
-      <div style="height:110px;display:flex;align-items:flex-end;justify-content:center">
-        <div title="${r.records} record • ${r.rate}% lengkap" style="width:32px;height:${h}%;border-radius:6px 6px 2px 2px;background:#0b5cab;min-height:4px"></div>
-      </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:5px">${phase2FMonthLabel(r.month)}</div>
-      <div style="font-size:11px;font-weight:700;margin-top:2px">${r.rate}%</div>
-    </div>`;
-  }).join('');
-  const table=rows.map(r=>`<tr><td>${phase2FMonthLabel(r.month)}</td><td>${r.people}</td><td>${r.records}</td><td>${r.checkin}</td><td>${r.complete}</td><td>${r.rate}%</td></tr>`).join('');
-  return `<div class="rep-v2-card" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
-      <div><div class="rep-v2-title">📈 Tren Kehadiran 6 Bulan</div><div class="rep-v2-muted" style="margin-top:4px">${selectedDivisionLabelPhase2F()} • mengikuti filter divisi yang sedang dipilih.</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><span class="badge b-blue">Rata-rata ${avg}%</span><span class="badge ${delta>=0?'b-green':'b-yellow'}">${delta>=0?'+':''}${delta}% vs bulan lalu</span></div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:flex-end;margin-top:16px;padding:8px 4px 0;border-bottom:1px solid var(--border)">${bars}</div>
-    <div class="rep-v2-grid3" style="margin-top:12px">
-      <div class="rep-v2-kpi"><small>Bulan Berjalan</small><strong>${current.rate}%</strong><span class="rep-v2-muted">${current.complete}/${current.checkin} lengkap</span></div>
-      <div class="rep-v2-kpi"><small>Record</small><strong>${current.records}</strong><span class="rep-v2-muted">${current.people} anggota hadir</span></div>
-      <div class="rep-v2-kpi"><small>Rata-rata 6 Bulan</small><strong>${avg}%</strong><span class="rep-v2-muted">kelengkapan</span></div>
-    </div>
-    <div style="overflow-x:auto;margin-top:14px"><table class="table"><thead><tr><th>Bulan</th><th>Anggota Hadir</th><th>Record</th><th>Check-in</th><th>Lengkap</th><th>Kelengkapan</th></tr></thead><tbody>${table}</tbody></table></div>
-  </div>`;
-}
-function selectedDivisionLabelPhase2F(){
-  const v=String(reportingV2?.attendanceDivision||'').trim();
-  return v||'Semua Divisi';
-}
-
-const _phase2FBaseAttendanceTab=repV2AttendanceTab;
-repV2AttendanceTab=function(data){
-  return _phase2FBaseAttendanceTab(data)+phase2FTrendBlock(data);
-};
-window.repV2AttendanceTab=repV2AttendanceTab;
-if(typeof reportingV2AttendancePageTab==='function'){
-  reportingV2AttendancePageTab=function(data){return repV2AttendanceTab(data);};
-}
 </script>
 
 </body>
