@@ -1837,6 +1837,7 @@ async function login(){
     const role=profile?.role || 'Staff';
 
     state.user={id:data.user.id,email:data.user.email,name,division,role,photoUrl:profile?.avatar_url||''};
+    try{ await loadAttendanceFromSupabase(); }catch(e){ console.warn('Attendance initial sync skipped:',e); }
     state.checkedIn=false;
     photoVerified=false;
     save();
@@ -3068,6 +3069,47 @@ const filePath = `${safeDate.slice(0,4)}/${safeDate.slice(4,6)}/${safeDate.slice
 
   return filePath;
 }
+async function loadAttendanceFromSupabase(){
+  if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
+
+  const {data:{user},error:userError}=await supabaseClient.auth.getUser();
+  if(userError) throw userError;
+  if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan.');
+
+  const {data,error}=await supabaseClient
+    .from('attendance')
+    .select('id,user_id,attendance_date,check_in,check_out,verification_status,verification_photo_url,notes')
+    .order('attendance_date',{ascending:false})
+    .order('check_in',{ascending:false,nullsLast:true});
+
+  if(error) throw error;
+
+  state.attendanceRecords=(data||[]).map(row=>{
+    const isCurrentUser=row.user_id===user.id;
+    const checkIn=row.check_in ? new Date(row.check_in).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Jakarta'}) : '';
+    const checkOut=row.check_out ? new Date(row.check_out).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Jakarta'}) : '';
+    return {
+      id:row.id || ('ABS-'+row.user_id+'-'+row.attendance_date),
+      supabaseId:row.id||'',
+      userId:row.user_id||'',
+      date:row.attendance_date||'',
+      name:isCurrentUser ? (state.user?.name||'Pengguna') : (row.user_id||'Pengguna'),
+      division:isCurrentUser ? (state.user?.division||'') : '',
+      role:isCurrentUser ? (state.user?.role||'') : '',
+      checkIn,
+      checkOut,
+      status:checkOut ? 'SELESAI' : 'HADIR',
+      photoVerified:row.verification_status==='Verified',
+      verificationStatus:row.verification_status||'',
+      verificationPhotoUrl:row.verification_photo_url||'',
+      notes:row.notes||''
+    };
+  });
+
+  try{ save(); }catch(e){ console.warn('Attendance local cache save failed',e); }
+  return state.attendanceRecords;
+}
+
 async function syncAttendanceCheckInToSupabase(){
   if(!window.supabase || !supabaseClient) throw new Error('Koneksi Supabase belum siap.');
   const {data:{user},error:userError}=await supabaseClient.auth.getUser();
@@ -3118,6 +3160,7 @@ async function syncAttendanceCheckOutToSupabase(){
 checkOut = async function(){
   try{
     await syncAttendanceCheckOutToSupabase();
+    await loadAttendanceFromSupabase();
     stage1RecordCheckOut();
     state.checkedIn=false;
     localStorage.removeItem('sa_checkin_time');
@@ -3141,6 +3184,7 @@ confirmAttendance = async function(){
   button.textContent='MENYIMPAN ABSENSI...';
   try{
     await syncAttendanceCheckInToSupabase();
+    await loadAttendanceFromSupabase();
     state.checkedIn=true;
     localStorage.setItem('sa_checkin_time',nowTime());
     localStorage.setItem('sa_attendance_photo','verified');
