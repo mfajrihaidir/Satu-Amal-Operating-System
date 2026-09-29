@@ -8090,5 +8090,142 @@ window.repV2AttendanceChangeDate=repV2AttendanceChangeDate;
 window.repV2AttendanceChangeDivision=repV2AttendanceChangeDivision;
 </script>
 
+<script id="phase-2e-attendance-detail">
+/* =========================================================
+   PHASE 2E — DETAIL RIWAYAT ABSENSI PER ANGGOTA
+   Dibangun di atas Phase 2D tanpa mengubah alur check-in/out.
+   ========================================================= */
+function phase2EEsc(v){
+  return typeof repV2AttEsc==='function' ? repV2AttEsc(v) : String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function phase2ETime(v){
+  return typeof repV2AttTime==='function' ? repV2AttTime(v) : (v ? String(v).slice(0,5) : '-');
+}
+function phase2ERecordsForUser(userId){
+  const month=reportingV2.month;
+  return (repV2ActiveData().attendance||[])
+    .filter(a=>String(a.user_id||'')===String(userId||'') && String(a.attendance_date||'').slice(0,7)===String(month||'').slice(0,7))
+    .sort((a,b)=>String(b.attendance_date||'').localeCompare(String(a.attendance_date||'')));
+}
+function phase2EMemberProfile(userId){
+  return (repV2ActiveData().profiles||[]).find(p=>String(p.id||'')===String(userId||''))||null;
+}
+function phase2EMemberStats(records){
+  const days=new Set(records.map(r=>String(r.attendance_date||'').slice(0,10)).filter(Boolean)).size;
+  const checkin=records.filter(r=>r.check_in).length;
+  const checkout=records.filter(r=>r.check_out).length;
+  const complete=records.filter(r=>r.check_in&&r.check_out).length;
+  return {days,records:records.length,checkin,checkout,complete,rate:checkin?Math.round(complete/checkin*100):0};
+}
+function phase2EStatus(r){
+  if(!r?.check_in)return {label:'Belum Check-in',icon:'🔴',cls:'rep-v2-bad'};
+  if(!r?.check_out)return {label:'Belum Check-out',icon:'🟡',cls:'rep-v2-warn'};
+  return {label:'Lengkap',icon:'🟢',cls:'rep-v2-good'};
+}
+function phase2EMemberDetail(userId){
+  const profile=phase2EMemberProfile(userId);
+  if(!profile){if(typeof toast==='function')toast('Profil anggota tidak ditemukan.');return;}
+  const records=phase2ERecordsForUser(userId);
+  const st=phase2EMemberStats(records);
+  const rows=records.map(r=>{
+    const status=phase2EStatus(r);
+    return `<tr>
+      <td>${phase2EEsc(repV2Date(r.attendance_date))}</td>
+      <td>${phase2ETime(r.check_in)}</td>
+      <td>${phase2ETime(r.check_out)}</td>
+      <td><span class="${status.cls}">${status.icon} ${status.label}</span></td>
+      <td>${phase2EEsc(r.verification_status||'-')}</td>
+    </tr>`;
+  }).join('')||`<tr><td colspan="5" class="empty">Belum ada riwayat absensi pada periode ini.</td></tr>`;
+
+  const todayRecord=records.find(r=>String(r.attendance_date||'').slice(0,10)===String(reportingV2.attendanceDate||''));
+  const todayStatus=phase2EStatus(todayRecord);
+  const html=`
+    <div class="page-head">
+      <div>
+        <h1>Detail Absensi Anggota</h1>
+        <p>Riwayat absensi ${phase2EEsc(repV2MonthLabel(reportingV2.month))} berdasarkan data Supabase.</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-secondary btn-small" onclick="openPhase2CAttendance()">← Kembali ke Absensi</button>
+        <button type="button" class="btn btn-secondary btn-small" onclick="phase2EExportMemberCSV('${phase2EEsc(userId)}')">⬇️ Export CSV</button>
+      </div>
+    </div>
+
+    <div class="rep-v2-card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div class="rep-v2-title" style="font-size:16px">${phase2EEsc(profile.full_name||'-')}</div>
+          <div class="rep-v2-muted" style="margin-top:5px">${phase2EEsc(profile.division||'-')} · ${phase2EEsc(profile.job_title||profile.role||'-')}</div>
+        </div>
+        <div><span class="${todayStatus.cls}">${todayStatus.icon} ${todayStatus.label}</span></div>
+      </div>
+    </div>
+
+    <div class="rep-v2-kpis" style="margin-bottom:12px">
+      <div class="rep-v2-kpi"><small>Hari Hadir</small><strong>${st.days}</strong><span class="rep-v2-muted">tanggal unik</span></div>
+      <div class="rep-v2-kpi"><small>Record</small><strong>${st.records}</strong><span class="rep-v2-muted">periode terpilih</span></div>
+      <div class="rep-v2-kpi"><small>Lengkap</small><strong>${st.complete}</strong><span class="rep-v2-muted">check-in + check-out</span></div>
+      <div class="rep-v2-kpi"><small>Kelengkapan</small><strong>${st.rate}%</strong><span class="rep-v2-muted">dari check-in</span></div>
+    </div>
+
+    <div class="rep-v2-card">
+      <div class="rep-v2-title">Riwayat Harian</div>
+      <div class="rep-v2-muted" style="margin:4px 0 10px">Periode ${phase2EEsc(repV2MonthLabel(reportingV2.month))}</div>
+      <div style="overflow-x:auto"><table class="table">
+        <thead><tr><th>Tanggal</th><th>Check-in</th><th>Check-out</th><th>Status</th><th>Verifikasi</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+
+  const el=document.getElementById('content');
+  if(!el) return;
+  el.innerHTML=html;
+  document.querySelectorAll('.rep-v2-tab').forEach(b=>b.classList.remove('active'));
+}
+function phase2EExportMemberCSV(userId){
+  const profile=phase2EMemberProfile(userId);
+  const records=phase2ERecordsForUser(userId);
+  if(!profile){if(typeof toast==='function')toast('Profil anggota tidak ditemukan.');return;}
+  const rows=[['Nama','Divisi','Jabatan','Tanggal','Check-in','Check-out','Status','Verifikasi']];
+  records.forEach(r=>{
+    const st=phase2EStatus(r);
+    rows.push([profile.full_name||'-',profile.division||'-',profile.job_title||profile.role||'-',repV2Date(r.attendance_date),phase2ETime(r.check_in),phase2ETime(r.check_out),st.label,r.verification_status||'-']);
+  });
+  const csv=rows.map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  downloadFile(`detail-absensi-${String(profile.full_name||'anggota').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')}-${reportingV2.month}.csv`,'\ufeff'+csv,'text/csv;charset=utf-8');
+  if(typeof toast==='function')toast('Detail absensi berhasil diekspor.');
+}
+window.phase2EMemberDetail=phase2EMemberDetail;
+window.phase2EExportMemberCSV=phase2EExportMemberCSV;
+
+/* Tambahkan tombol Detail ke tabel anggota Phase 2D tanpa mengganti renderer utamanya. */
+const _phase2EBaseAttendanceTab=repV2AttendanceTab;
+repV2AttendanceTab=function(d){
+  const base=_phase2EBaseAttendanceTab(d);
+  const rows=repV2AttRows(d);
+  const detailRows=rows.map(r=>{
+    const uid=String(r.profile?.id||'');
+    return `<tr>
+      <td><strong>${phase2EEsc(r.profile?.full_name||'-')}</strong></td>
+      <td>${phase2EEsc(r.profile?.division||'-')}</td>
+      <td>${r.days}</td><td>${r.records}</td><td>${r.complete}</td><td>${r.rate}%</td>
+      <td><button type="button" class="btn btn-secondary btn-small" onclick="phase2EMemberDetail('${phase2EEsc(uid)}')">Detail</button></td>
+    </tr>`;
+  }).join('')||`<tr><td colspan="7" class="empty">Belum ada anggota pada filter ini.</td></tr>`;
+  const detailBlock=`<div class="rep-v2-card" style="margin-top:12px">
+    <div class="rep-v2-title">Detail Anggota</div>
+    <div class="rep-v2-muted" style="margin:4px 0 10px">Buka riwayat absensi lengkap per anggota pada periode yang sedang dipilih.</div>
+    <div style="overflow-x:auto"><table class="table"><thead><tr><th>Anggota</th><th>Divisi</th><th>Hari Hadir</th><th>Record</th><th>Lengkap</th><th>Kelengkapan</th><th>Aksi</th></tr></thead><tbody>${detailRows}</tbody></table></div>
+  </div>`;
+  return base+detailBlock;
+};
+window.repV2AttendanceTab=repV2AttendanceTab;
+
+/* Pastikan wrapper Phase 2C/2D memakai renderer terbaru. */
+if(typeof reportingV2AttendancePageTab==='function'){
+  reportingV2AttendancePageTab=function(data){return repV2AttendanceTab(data);};
+}
+</script>
 </body>
 </html>
