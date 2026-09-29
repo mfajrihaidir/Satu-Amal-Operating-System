@@ -7631,6 +7631,34 @@ function repV2Partnership(d){
   return {target:repV2Num(target?.target_amount),closing,achievement:repV2Pct(closing,repV2Num(target?.target_amount)),remaining:Math.max(0,repV2Num(target?.target_amount)-closing),pipeline,prospects:d.partnerships.length,activities:d.activities.length,proposals:d.proposals.length,proposalValue:d.proposals.reduce((a,x)=>a+repV2Num(x.proposal_value),0),closingCount:d.partnerships.filter(x=>x.closing_confirmed).length,activityPIC:d.activities.reduce((m,x)=>(m[x.pic_id||'UNKNOWN']=(m[x.pic_id||'UNKNOWN']||0)+1,m),{})};
 }
 
+function repV2AttendanceTime(v){
+  if(!v) return '-';
+  const dt=new Date(v);
+  if(Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Jakarta'})+' WIB';
+}
+function repV2AttendanceStatus(x){
+  if(x.check_out) return 'SELESAI';
+  if(x.check_in) return 'HADIR';
+  return x.verification_status||'BELUM';
+}
+function repV2AttendanceRows(d,limit=30){
+  const profiles=d.profiles||[];
+  const profileMap=new Map(profiles.map(p=>[p.id,p]));
+  return (d.attendance||[])
+    .slice()
+    .sort((a,b)=>String(b.attendance_date||'').localeCompare(String(a.attendance_date||'')) || String(b.check_in||'').localeCompare(String(a.check_in||'')))
+    .slice(0,limit)
+    .map(x=>{
+      const p=profileMap.get(x.user_id);
+      const name=p?.full_name||x.user_id||'Tanpa pengguna';
+      const division=p?.division||'-';
+      const status=repV2AttendanceStatus(x);
+      const badge=status==='SELESAI'?'b-green':status==='HADIR'?'b-yellow':'b-blue';
+      return `<tr><td>${repV2Date(x.attendance_date)}</td><td>${repV2Esc(name)}</td><td>${repV2Esc(division)}</td><td>${repV2AttendanceTime(x.check_in)}</td><td>${repV2AttendanceTime(x.check_out)}</td><td><span class="badge ${badge}">${repV2Esc(status)}</span></td></tr>`;
+    }).join('');
+}
+
 function repV2Team(d){
   const by={};
   const name=id=>d.profiles.find(p=>p.id===id)?.full_name||id||'Tanpa PIC';
@@ -7681,6 +7709,7 @@ function repV2Executive(d){
     ${repV2Kpi('Penerima Manfaat',repV2Money(p.real),`${repV2Money(p.target)} target • ${p.pct}% tercapai`)}${repV2Kpi('Program / Plan',`${p.programs} / ${p.plans}`,`${p.counts.running} berjalan • ${p.counts.done} selesai`)}${repV2Kpi('Konten',ct.total,`${ct.terbit} terbit • ${ct.overdue} terlambat`)}${repV2Kpi('Kemitraan',repV2Money(pa.closing),`${pa.closingCount} closing • pipeline ${repV2Money(pa.pipeline)}`)}${repV2Kpi('Absensi Tim',attendanceRows.length,`${attendanceComplete} lengkap • ${attendanceRate}% kelengkapan`)}
   </div>
   <div class="rep-v2-grid2" style="margin-top:12px"><div class="rep-v2-card"><div class="rep-v2-title">Target vs Realisasi Fundraising per Sumber</div><div style="margin-top:10px">${repV2Table(['Sumber','Target','Realisasi','Pencapaian','Sisa'],sourceRows||null)}</div></div><div class="rep-v2-card"><div class="rep-v2-title">Insight Operasional</div><div class="rep-v2-list">${ins.risks.slice(0,4).map(x=>`<div class="rep-v2-item rep-v2-bad">⚠️ ${repV2Esc(x)}</div>`).join('')||'<div class="rep-v2-item rep-v2-good">Tidak ada perhatian utama yang terdeteksi.</div>'}${ins.opportunities.slice(0,4).map(x=>`<div class="rep-v2-item">💡 ${repV2Esc(x)}</div>`).join('')}</div></div></div>
+  <div class="rep-v2-card" style="margin-top:12px"><div class="rep-v2-title">Detail Absensi — Live Supabase</div><div class="rep-v2-muted" style="margin-top:4px">Data diambil dari tabel attendance dan nama/divisi dipetakan melalui profiles. Waktu ditampilkan dalam WIB.</div><div style="margin-top:10px">${repV2Table(['Tanggal','Nama','Divisi','Check-in','Check-out','Status'],repV2AttendanceRows(d)||null)}</div></div>
   <div class="rep-v2-card" style="margin-top:12px"><div class="rep-v2-title">Kinerja Tim — Snapshot</div><div style="margin-top:10px">${repV2Table(['PIC','Divisi','Task','Selesai','Progress','CRM Follow-up','Kemitraan','Konten'],team.slice(0,8).map(x=>`<tr><td>${repV2Esc(x.name)}</td><td>${repV2Esc(x.division)}</td><td>${x.tasks}</td><td>${x.done}</td><td>${x.avgProgress}%</td><td>${x.crm}</td><td>${x.partnership}</td><td>${x.content}</td></tr>`).join(''))}</div></div>`;
 }
 
