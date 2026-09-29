@@ -5314,6 +5314,12 @@ async function syncDashboardLiveData(){
 
     if(document.getElementById('topTitle')?.textContent==='Dashboard'){
       document.getElementById('content').innerHTML=dashboardPageLiveV24();
+      // Phase 5: setelah dashboard live selesai dirender, sinkronkan kartu
+      // Jadwal Mendatang & Pengumuman dari Supabase. Ini mencegah render
+      // ulang dashboard menimpa data Phase 5 dengan konten hardcoded lama.
+      if(typeof phase5RefreshDashboard==='function'){
+        setTimeout(()=>phase5RefreshDashboard(),0);
+      }
     }
   }catch(err){
     console.error('Dashboard Live Supabase error',err);
