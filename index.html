@@ -1693,6 +1693,7 @@ body{overflow-x:hidden}
     <div class="nav-title">Sistem</div>
     <div class="nav">
       <button data-page="settings" onclick="showPage('settings')">⚙️ Data Pengguna</button>
+      <button data-page="agenda_admin" onclick="showPage('agenda_admin')" id="agendaAdminNav">📅 Agenda & Pengumuman</button>
       <button onclick="logout()">↩️ Keluar</button>
     </div>
   </aside>
@@ -7796,5 +7797,245 @@ window.downloadReportingV2CSV=downloadReportingV2CSV;
 
 </script>
 
+
+<style>
+/* ================= PHASE 5 — AGENDA & ANNOUNCEMENT ================= */
+.phase5-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.phase5-form{display:grid;gap:10px}
+.phase5-form .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.phase5-form label{display:grid;gap:5px;font-size:11px;font-weight:700;color:#58718b}
+.phase5-form input,.phase5-form textarea,.phase5-form select{width:100%;box-sizing:border-box;border:1px solid #dce7ef;border-radius:9px;padding:10px 11px;background:#fff;color:#173f61;font:inherit;font-size:12px}
+.phase5-form textarea{min-height:82px;resize:vertical}
+.phase5-list{display:grid;gap:8px;margin-top:12px}
+.phase5-item{border:1px solid #e4edf3;border-radius:10px;padding:11px;background:#fff}
+.phase5-item-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.phase5-item h4{margin:0;color:#173f61;font-size:13px}
+.phase5-item p{margin:5px 0 0;color:#71869a;font-size:11px;line-height:1.5}
+.phase5-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.phase5-empty{padding:18px;text-align:center;color:#8094a6;font-size:12px;border:1px dashed #dce7ef;border-radius:10px}
+.phase5-admin-note{margin-bottom:12px;padding:10px 12px;border-radius:9px;background:#eef7ff;color:#315f83;font-size:11px}
+@media(max-width:800px){
+  .phase5-grid{grid-template-columns:1fr}
+  .phase5-form .row2{grid-template-columns:1fr}
+  .phase5-item-head{display:block}
+}
+</style>
+<script>
+/* ================= PHASE 5 — AGENDA & ANNOUNCEMENT ================= */
+const phase5State={agenda:[],announcements:[],loaded:false};
+
+function phase5IsAdmin(){
+  const r=String(state.user?.role||'').trim().toLowerCase();
+  return ['admin sistem','admin','administrator'].includes(r);
+}
+
+function phase5Escape(v){return escapeHtml(v??'');}
+function phase5Date(v){
+  if(!v)return '-';
+  try{return new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Jakarta'}).format(new Date(v+'T00:00:00+07:00'));}
+  catch(e){return v;}
+}
+function phase5Time(v){return String(v||'').slice(0,5);}
+function phase5AgendaLabel(x){
+  const d=phase5Date(x.event_date);
+  const t=x.start_time ? phase5Time(x.start_time)+(x.end_time?' – '+phase5Time(x.end_time):'') : '';
+  return t ? `${d} · ${t}` : d;
+}
+
+async function phase5LoadData(){
+  const [a,n]=await Promise.all([
+    supabaseClient.from('agenda_events').select('id,title,event_date,start_time,end_time,location,description,is_active,created_by,created_at,updated_at').order('event_date',{ascending:true}).order('start_time',{ascending:true}),
+    supabaseClient.from('announcements').select('id,title,content,published_date,is_published,priority,created_by,created_at,updated_at').order('priority',{ascending:false}).order('published_date',{ascending:false})
+  ]);
+  if(a.error)throw a.error;
+  if(n.error)throw n.error;
+  phase5State.agenda=a.data||[];
+  phase5State.announcements=n.data||[];
+  phase5State.loaded=true;
+  return phase5State;
+}
+
+function phase5AgendaForm(x={}){
+  return `<div class="phase5-form">
+    <input type="hidden" id="p5AgendaId" value="${phase5Escape(x.id||'')}">
+    <label>Judul Agenda<input id="p5AgendaTitle" value="${phase5Escape(x.title||'')}" placeholder="Contoh: Rapat Tim Marketing"></label>
+    <div class="row2">
+      <label>Tanggal<input type="date" id="p5AgendaDate" value="${phase5Escape(x.event_date||'')}"></label>
+      <label>Lokasi / Platform<input id="p5AgendaLocation" value="${phase5Escape(x.location||'')}" placeholder="Palembang / Google Meet"></label>
+    </div>
+    <div class="row2">
+      <label>Mulai<input type="time" id="p5AgendaStart" value="${phase5Escape(phase5Time(x.start_time))}"></label>
+      <label>Selesai<input type="time" id="p5AgendaEnd" value="${phase5Escape(phase5Time(x.end_time))}"></label>
+    </div>
+    <label>Keterangan<textarea id="p5AgendaDesc" placeholder="Keterangan agenda">${phase5Escape(x.description||'')}</textarea></label>
+    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="p5AgendaActive" ${x.id?((x.is_active??true)?'checked':''):'checked'} style="width:auto"> Tampilkan di Dashboard</label>
+    <div class="phase5-actions"><button class="btn btn-primary" onclick="phase5SaveAgenda()">${x.id?'Simpan Perubahan':'Tambah Agenda'}</button>${x.id?'<button class="btn btn-secondary" onclick="phase5OpenAgendaForm()">Batal</button>':''}</div>
+  </div>`;
+}
+
+function phase5AnnouncementForm(x={}){
+  return `<div class="phase5-form">
+    <input type="hidden" id="p5AnnId" value="${phase5Escape(x.id||'')}">
+    <label>Judul Pengumuman<input id="p5AnnTitle" value="${phase5Escape(x.title||'')}" placeholder="Contoh: Pengumuman Rapat Bulanan"></label>
+    <label>Isi Pengumuman<textarea id="p5AnnContent" placeholder="Tulis isi pengumuman">${phase5Escape(x.content||'')}</textarea></label>
+    <div class="row2">
+      <label>Tanggal<input type="date" id="p5AnnDate" value="${phase5Escape(x.published_date||todayIsoJakarta())}"></label>
+      <label>Prioritas<input type="number" id="p5AnnPriority" value="${Number(x.priority||0)}" min="0" step="1"></label>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="p5AnnPublished" ${x.id?((x.is_published??true)?'checked':''):'checked'} style="width:auto"> Tampilkan di Dashboard</label>
+    <div class="phase5-actions"><button class="btn btn-primary" onclick="phase5SaveAnnouncement()">${x.id?'Simpan Perubahan':'Tambah Pengumuman'}</button>${x.id?'<button class="btn btn-secondary" onclick="phase5OpenAnnouncementForm()">Batal</button>':''}</div>
+  </div>`;
+}
+
+function todayIsoJakarta(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+
+function phase5OpenAgendaForm(x={}){document.getElementById('p5AgendaForm').innerHTML=phase5AgendaForm(x);}
+function phase5OpenAnnouncementForm(x={}){document.getElementById('p5AnnouncementForm').innerHTML=phase5AnnouncementForm(x);}
+
+async function phase5SaveAgenda(){
+  if(!phase5IsAdmin()){toast('Akses admin diperlukan.');return;}
+  const id=document.getElementById('p5AgendaId').value.trim();
+  const title=document.getElementById('p5AgendaTitle').value.trim();
+  const event_date=document.getElementById('p5AgendaDate').value;
+  if(!title||!event_date){toast('Judul dan tanggal agenda wajib diisi.');return;}
+  const payload={title,event_date,start_time:document.getElementById('p5AgendaStart').value||null,end_time:document.getElementById('p5AgendaEnd').value||null,location:document.getElementById('p5AgendaLocation').value.trim(),description:document.getElementById('p5AgendaDesc').value.trim(),is_active:document.getElementById('p5AgendaActive').checked};
+  let result;
+  if(id) result=await supabaseClient.from('agenda_events').update(payload).eq('id',id).select().single();
+  else result=await supabaseClient.from('agenda_events').insert({...payload,created_by:(await getSupabaseSession())?.user?.id||null}).select().single();
+  if(result.error){console.error(result.error);toast('Agenda gagal disimpan.');return;}
+  toast(id?'Agenda diperbarui ✅':'Agenda ditambahkan ✅');
+  await phase5RefreshAll();
+  phase5OpenAgendaForm();
+}
+
+async function phase5DeleteAgenda(id){
+  if(!phase5IsAdmin()||!confirm('Hapus agenda ini?'))return;
+  const {error}=await supabaseClient.from('agenda_events').delete().eq('id',id);
+  if(error){console.error(error);toast('Agenda gagal dihapus.');return;}
+  toast('Agenda dihapus ✅');
+  await phase5RefreshAll();
+}
+
+async function phase5SaveAnnouncement(){
+  if(!phase5IsAdmin()){toast('Akses admin diperlukan.');return;}
+  const id=document.getElementById('p5AnnId').value.trim();
+  const title=document.getElementById('p5AnnTitle').value.trim();
+  const content=document.getElementById('p5AnnContent').value.trim();
+  if(!title||!content){toast('Judul dan isi pengumuman wajib diisi.');return;}
+  const payload={title,content,published_date:document.getElementById('p5AnnDate').value||todayIsoJakarta(),priority:Number(document.getElementById('p5AnnPriority').value||0),is_published:document.getElementById('p5AnnPublished').checked};
+  let result;
+  if(id) result=await supabaseClient.from('announcements').update(payload).eq('id',id).select().single();
+  else result=await supabaseClient.from('announcements').insert({...payload,created_by:(await getSupabaseSession())?.user?.id||null}).select().single();
+  if(result.error){console.error(result.error);toast('Pengumuman gagal disimpan.');return;}
+  toast(id?'Pengumuman diperbarui ✅':'Pengumuman ditambahkan ✅');
+  await phase5RefreshAll();
+  phase5OpenAnnouncementForm();
+}
+
+async function phase5DeleteAnnouncement(id){
+  if(!phase5IsAdmin()||!confirm('Hapus pengumuman ini?'))return;
+  const {error}=await supabaseClient.from('announcements').delete().eq('id',id);
+  if(error){console.error(error);toast('Pengumuman gagal dihapus.');return;}
+  toast('Pengumuman dihapus ✅');
+  await phase5RefreshAll();
+}
+
+function phase5AdminPage(){
+  if(!phase5IsAdmin())return `<div class="page-head"><div><h1>Akses Ditolak</h1><p>Halaman ini hanya dapat dikelola oleh Admin Sistem.</p></div></div>`;
+  const agenda=phase5State.agenda||[];
+  const anns=phase5State.announcements||[];
+  return `<div class="page-head"><div><h1>Agenda & Pengumuman</h1><p>Kelola informasi yang tampil di Dashboard Satu Amal OS.</p></div><button class="btn btn-secondary" onclick="phase5RefreshAll()">↻ Refresh</button></div>
+  <div class="phase5-admin-note">Perubahan di halaman ini langsung tersimpan ke Supabase dan otomatis digunakan oleh Dashboard.</div>
+  <div class="phase5-grid">
+    <div class="card"><div class="section-title">Agenda</div><div id="p5AgendaForm"></div><div class="phase5-list">${agenda.length?agenda.map(x=>`<div class="phase5-item"><div class="phase5-item-head"><div><h4>${phase5Escape(x.title)}</h4><p>${phase5AgendaLabel(x)}${x.location?' · '+phase5Escape(x.location):''}</p></div><span class="badge ${x.is_active?'b-green':'b-yellow'}">${x.is_active?'AKTIF':'DISEMBUNYIKAN'}</span></div>${x.description?`<p>${phase5Escape(x.description)}</p>`:''}<div class="phase5-actions"><button class="btn btn-secondary btn-small" onclick='phase5OpenAgendaForm(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Edit</button><button class="btn btn-danger btn-small" onclick="phase5DeleteAgenda('${x.id}')">Hapus</button></div></div>`).join(''):'<div class="phase5-empty">Belum ada agenda.</div>'}</div></div>
+    <div class="card"><div class="section-title">Pengumuman</div><div id="p5AnnouncementForm"></div><div class="phase5-list">${anns.length?anns.map(x=>`<div class="phase5-item"><div class="phase5-item-head"><div><h4>${phase5Escape(x.title)}</h4><p>${phase5Date(x.published_date)} · Prioritas ${Number(x.priority||0)}</p></div><span class="badge ${x.is_published?'b-green':'b-yellow'}">${x.is_published?'TERBIT':'DRAFT'}</span></div><p>${phase5Escape(x.content)}</p><div class="phase5-actions"><button class="btn btn-secondary btn-small" onclick='phase5OpenAnnouncementForm(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Edit</button><button class="btn btn-danger btn-small" onclick="phase5DeleteAnnouncement('${x.id}')">Hapus</button></div></div>`).join(''):'<div class="phase5-empty">Belum ada pengumuman.</div>'}</div></div>
+  </div>`;
+}
+
+async function phase5RefreshAll(){
+  try{
+    await phase5LoadData();
+    const el=document.getElementById('content');
+    if(el && document.getElementById('topTitle')?.textContent==='Agenda & Pengumuman'){
+      el.innerHTML=phase5AdminPage();
+      phase5OpenAgendaForm();
+      phase5OpenAnnouncementForm();
+    }
+    await phase5RefreshDashboard();
+  }catch(err){console.error('Phase 5 load error:',err);toast('Data Agenda/Pengumuman gagal dimuat.');}
+}
+
+function phase5Upcoming(){
+  const today=todayIsoJakarta();
+  return (phase5State.agenda||[]).filter(x=>x.is_active && x.event_date>=today).sort((a,b)=>String(a.event_date+a.start_time).localeCompare(String(b.event_date+b.start_time))).slice(0,3);
+}
+function phase5Published(){return (phase5State.announcements||[]).filter(x=>x.is_published).sort((a,b)=>(Number(b.priority||0)-Number(a.priority||0))||String(b.published_date).localeCompare(String(a.published_date))).slice(0,1);}
+
+function phase5ScheduleHtml(){
+  const rows=phase5Upcoming();
+  if(!rows.length)return '<div class="empty">Belum ada jadwal mendatang.</div>';
+  return rows.map(x=>{const d=new Date(x.event_date+'T00:00:00+07:00');const day=new Intl.DateTimeFormat('id-ID',{day:'2-digit',timeZone:'Asia/Jakarta'}).format(d);const mon=new Intl.DateTimeFormat('id-ID',{month:'short',timeZone:'Asia/Jakarta'}).format(d).toUpperCase();const t=x.start_time?(phase5Time(x.start_time)+(x.end_time?' – '+phase5Time(x.end_time):'')):'Waktu menyusul';return `<div class="schedule-item"><div class="datebox"><b>${day}</b><span>${mon}</span></div><div><h4>${phase5Escape(x.title)}</h4><p>${phase5Escape(t)}${x.location?' · '+phase5Escape(x.location):''}</p></div></div>`;}).join('');
+}
+function phase5AnnouncementHtml(){
+  const x=phase5Published()[0];
+  if(!x)return '<div class="empty">Belum ada pengumuman aktif.</div>';
+  return `<div class="announcement dashboard-link" onclick="openAnnouncement()" style="cursor:pointer"><h4>📣 ${phase5Escape(x.title)}</h4><p>${phase5Escape(x.content).replace(/\n/g,'<br>')}<br><br>${phase5Escape(phase5Date(x.published_date))}</p></div>`;
+}
+
+async function phase5RefreshDashboard(){
+  try{if(!phase5State.loaded)await phase5LoadData();}catch(err){console.error(err);return;}
+  const cards=document.querySelectorAll('.dashboard-right .card');
+  if(cards.length>=3){
+    const schedule=cards[1];
+    const ann=cards[2];
+    const sh=schedule.querySelector('.right-title');
+    if(sh)sh.innerHTML='<strong>Jadwal Mendatang</strong><a href="#" onclick="event.preventDefault();openCalendar()">Lihat Kalender</a>';
+    schedule.querySelectorAll('.schedule-item').forEach(el=>el.remove());
+    schedule.insertAdjacentHTML('beforeend',phase5ScheduleHtml());
+    const ah=ann.querySelector('.right-title');
+    if(ah)ah.innerHTML='<strong>Pengumuman</strong><a href="#" onclick="event.preventDefault();openAnnouncement()">Lihat Semua</a>';
+    const old=ann.querySelector('.announcement'); if(old)old.remove();
+    ann.insertAdjacentHTML('beforeend',phase5AnnouncementHtml());
+  }
+}
+
+/* Replace the old hardcoded modal content with database data. */
+function openCalendar(){
+  const rows=phase5Upcoming();
+  document.getElementById('modalBox').innerHTML=`<h2>Jadwal Mendatang</h2>${rows.length?rows.map(x=>`<div class="task" style="display:block"><strong>${phase5Escape(phase5Date(x.event_date))} · ${phase5Escape(x.title)}</strong><p>${x.start_time?phase5Time(x.start_time):''}${x.end_time?' – '+phase5Time(x.end_time):''}${x.location?' · '+phase5Escape(x.location):''}</p>${x.description?`<p>${phase5Escape(x.description)}</p>`:''}</div>`).join(''):'<div class="empty">Belum ada jadwal mendatang.</div>'}<div style="text-align:right;margin-top:14px"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function openAnnouncement(){
+  const rows=phase5State.announcements.filter(x=>x.is_published).sort((a,b)=>(Number(b.priority||0)-Number(a.priority||0))||String(b.published_date).localeCompare(String(a.published_date)));
+  document.getElementById('modalBox').innerHTML=`<h2>Pengumuman</h2>${rows.length?rows.map(x=>`<div class="alert"><strong>${phase5Escape(x.title)}</strong><br><br>${phase5Escape(x.content).replace(/\n/g,'<br>')}<br><br><small>${phase5Escape(phase5Date(x.published_date))}</small></div>`).join(''):'<div class="empty">Belum ada pengumuman aktif.</div>'}<div style="text-align:right;margin-top:14px"><button class="btn btn-secondary" onclick="closeModal()">Tutup</button></div>`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+/* Final Phase 5 route wrapper. */
+const phase5BaseShowPage=showPage;
+showPage=function(page){
+  if(page==='agenda_admin'){
+    if(!phase5IsAdmin()){toast('Akses admin diperlukan.');return;}
+    document.querySelectorAll('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+    document.getElementById('topTitle').textContent='Agenda & Pengumuman';
+    document.getElementById('content').innerHTML=phase5AdminPage();
+    document.getElementById('sidebar').classList.remove('open');
+    phase5OpenAgendaForm();phase5OpenAnnouncementForm();
+    phase5RefreshAll();
+    return;
+  }
+  phase5BaseShowPage(page);
+  if(page==='dashboard')setTimeout(()=>phase5RefreshDashboard(),50);
+};
+window.showPage=showPage;
+
+/* Hide the admin nav item for non-admin users; DB RLS remains the real security boundary. */
+function phase5ApplyAdminNav(){
+  const b=document.getElementById('agendaAdminNav');
+  if(b)b.classList.toggle('permission-hidden',!phase5IsAdmin());
+}
+phase5ApplyAdminNav();
+setTimeout(phase5ApplyAdminNav,1200);
+</script>
 </body>
 </html>
