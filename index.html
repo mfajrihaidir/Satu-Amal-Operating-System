@@ -7973,7 +7973,12 @@ function openPhase2CAttendance(){
     const el=document.getElementById('content');
     if(!el)throw new Error('Container Pelaporan tidak ditemukan.');
     const data=repV2Filtered(repV2ActiveData());
-    el.innerHTML=reportingV2AttendancePageTab(data);
+    /* FIX 3: do not depend on the optional page-wrapper function. */
+    const renderer = (typeof repV2AttendancePageTab === 'function')
+      ? repV2AttendancePageTab
+      : ((typeof repV2AttendanceTab === 'function') ? repV2AttendanceTab : null);
+    if(!renderer) throw new Error('Renderer absensi Phase 2C belum termuat.');
+    el.innerHTML=renderer(data);
     document.querySelectorAll('.rep-v2-tab').forEach(b=>b.classList.toggle('active',b.textContent.trim()==='Absensi Tim'));
   }catch(err){
     console.error('Phase 2C attendance render error:',err);
