@@ -527,6 +527,17 @@ body{
     z-index:50;
   }
 
+  .mobile-back{
+    display:grid !important;
+    place-items:center;
+    flex:0 0 42px;
+    width:42px;
+    height:42px;
+    padding:0 !important;
+    font-size:21px;
+    border-radius:10px !important;
+  }
+
   .mobile-toggle{
     display:grid !important;
     place-items:center;
@@ -962,6 +973,17 @@ body{
     justify-content:space-between !important;
     gap:8px !important;
     overflow:hidden !important;
+  }
+
+  .mobile-back{
+    display:grid !important;
+    place-items:center !important;
+    flex:0 0 40px !important;
+    width:40px !important;
+    height:40px !important;
+    min-width:40px !important;
+    padding:0 !important;
+    font-size:20px !important;
   }
 
   .mobile-toggle{
@@ -1677,7 +1699,8 @@ body{overflow-x:hidden}
 
   <main class="main">
     <header class="topbar">
-      <button class="btn btn-secondary mobile-toggle" onclick="toggleSide()">☰</button>
+      <button class="btn btn-secondary mobile-back" onclick="mobileBack()" aria-label="Kembali">←</button>
+      <button class="btn btn-secondary mobile-toggle" onclick="toggleSide()" aria-label="Buka menu">☰</button>
       <div><strong id="topTitle">Dashboard</strong><div style="font-size:11px;color:var(--muted)" id="topDate">Satu Amal Operating System</div></div>
       <div class="user" id="profileQuick" onclick="openProfileModal()" title="Edit profil">
   <div style="text-align:right">
@@ -1781,27 +1804,8 @@ function save(){
   localStorage.setItem('sa_reports',JSON.stringify(state.reports));
   localStorage.setItem('sa_dashboard_tasks',JSON.stringify(dashboardTasks));
 }
-const SA_TIMEZONE='Asia/Jakarta';
-function todayLong(){return new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:SA_TIMEZONE});}
-function nowTime(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:SA_TIMEZONE});}
-function formatWIBDateTime(value){
-  if(!value) return '-';
-  const d=new Date(value);
-  if(Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleString('id-ID',{timeZone:SA_TIMEZONE,day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
-}
-function formatWIBTime(value){
-  if(!value) return nowTime();
-  const d=new Date(value);
-  if(Number.isNaN(d.getTime())) return nowTime();
-  return d.toLocaleTimeString('id-ID',{timeZone:SA_TIMEZONE,hour:'2-digit',minute:'2-digit',hour12:false});
-}
-function formatWIBDate(value){
-  if(!value) return stage1Date();
-  const d=new Date(value);
-  if(Number.isNaN(d.getTime())) return stage1Date();
-  return new Intl.DateTimeFormat('en-CA',{timeZone:SA_TIMEZONE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
-}
+function todayLong(){return new Date().toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:'Asia/Jakarta'});}
+function nowTime(){return new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Jakarta'});}
 let cameraStream = null;
 let photoVerified = false;
 
@@ -2935,6 +2939,11 @@ function escapeHtml(value){
 function settingsPage(){return `<div class="page-head"><div><h1>Data Pengguna</h1><p>Pengaturan dasar akun dan hak akses.</p></div><button class="btn btn-primary" onclick="openProfileModal()">Edit Profil</button></div><div class="card"><table class="table"><thead><tr><th>Nama</th><th>Divisi</th><th>Peran</th><th>Status</th></tr></thead><tbody><tr><td>${state.user.name}</td><td>${state.user.division}</td><td>${state.user.role}</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Nur</td><td>CRM / Donor</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr><tr><td>Intan</td><td>Fundraising</td><td>Staff</td><td><span class="badge b-green">AKTIF</span></td></tr></tbody></table></div>`}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),2200)}
 function toggleSide(){document.getElementById('sidebar').classList.toggle('open')}
+function mobileBack(){
+  const sidebar=document.getElementById('sidebar');
+  if(sidebar?.classList.contains('open')){ sidebar.classList.remove('open'); return; }
+  showPage('dashboard');
+}
 if(state.user && state.checkedIn){
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('verificationScreen').classList.add('hidden');
@@ -3014,11 +3023,11 @@ function stage1TodayAttendance(){
   const name=state.user?.name||'';
   return state.attendanceRecords.find(x=>x.date===d && x.name===name);
 }
-function stage1RecordCheckIn(serverTimestamp){
+function stage1RecordCheckIn(){
   if(!state.user) return;
-  const d=formatWIBDate(serverTimestamp)||stage1Date();
+  const d=stage1Date();
   const existing=stage1TodayAttendance();
-  const now=formatWIBTime(serverTimestamp);
+  const now=nowTime();
   if(existing){
     existing.checkIn=existing.checkIn||now;
     existing.status='HADIR';
@@ -3032,9 +3041,9 @@ function stage1RecordCheckIn(serverTimestamp){
     });
   }
 }
-function stage1RecordCheckOut(serverTimestamp){
+function stage1RecordCheckOut(){
   const r=stage1TodayAttendance();
-  if(r){r.checkOut=formatWIBTime(serverTimestamp);r.status='SELESAI';}
+  if(r){r.checkOut=nowTime();r.status='SELESAI';}
 }
 function attendanceSummary(){
   const month=stage1Month(new Date().toISOString());
@@ -3060,8 +3069,6 @@ attendancePage = function(){
   <div class="card" style="padding:16px;margin-top:16px;overflow-x:auto"><div class="section-title" style="margin-bottom:10px">Riwayat Absensi Terbaru</div><table class="table"><thead><tr><th>Tanggal</th><th>Nama</th><th>Divisi</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr></thead><tbody>${history}</tbody></table></div>`;
 };
 
-/* ===== PHASE 3: SERVER TIME — WIB / ASIA-JAKARTA ===== */
-/* Supabase/PostgreSQL is the source of truth for attendance timestamps. */
 /* ===== STAGE 2: REAL ATTENDANCE SYNC TO SUPABASE ===== */
   async function uploadAttendancePhoto(userId, attendanceDate){
   const img = document.getElementById('capturedPhoto');
@@ -3095,20 +3102,25 @@ async function syncAttendanceCheckInToSupabase(){
   if(userError) throw userError;
   if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
 
-  /*
-   * Phase 3: tanggal dan timestamp absensi ditentukan oleh PostgreSQL server.
-   * Database memakai now() lalu aplikasi menampilkan timestamp tersebut sebagai WIB.
-   */
-  const clientDate=stage1Date();
-  const photoPath = await uploadAttendancePhoto(user.id,clientDate);
-  const {data,error}=await supabaseClient.rpc('record_attendance_checkin',{
-    p_photo_path:photoPath,
-    p_notes:'Verifikasi kehadiran melalui kamera perangkat'
-  });
+  const attendanceDate=stage1Date();
+  const photoPath = await uploadAttendancePhoto(
+  user.id,
+  attendanceDate
+);
+  const payload={
+    user_id:user.id,
+    attendance_date:attendanceDate,
+    check_in:new Date().toISOString(),
+    verification_status:'Verified',
+    verification_photo_url:photoPath,
+    notes:'Verifikasi kehadiran melalui kamera perangkat'
+  };
+
+  const {error}=await supabaseClient
+    .from('attendance')
+    .upsert(payload,{onConflict:'user_id,attendance_date'});
   if(error) throw error;
-  const record=Array.isArray(data)?data[0]:data;
-  if(!record) throw new Error('Server tidak mengembalikan record absensi.');
-  return {userId:user.id,attendanceDate:record.attendance_date,serverTimestamp:record.check_in,record};
+  return {userId:user.id,attendanceDate};
 }
 
 async function syncAttendanceCheckOutToSupabase(){
@@ -3117,18 +3129,24 @@ async function syncAttendanceCheckOutToSupabase(){
   if(userError) throw userError;
   if(!user?.id) throw new Error('Sesi login Supabase tidak ditemukan. Silakan login ulang.');
 
-  const {data,error}=await supabaseClient.rpc('record_attendance_checkout');
+  const {data,error}=await supabaseClient
+    .from('attendance')
+    .update({check_out:new Date().toISOString()})
+    .eq('user_id',user.id)
+    .eq('attendance_date',stage1Date())
+    .select('id')
+    .maybeSingle();
+
   if(error) throw error;
-  const record=Array.isArray(data)?data[0]:data;
-  if(!record) throw new Error('Record absensi hari ini belum ditemukan di Supabase.');
-  return {userId:user.id,attendanceDate:record.attendance_date,serverTimestamp:record.check_out,record};
+  if(!data) throw new Error('Record absensi hari ini belum ditemukan di Supabase.');
+  return data;
 }
 
 /* Override attendance actions: Supabase is the source of truth, local Stage 1 is kept as a mirror. */
 checkOut = async function(){
   try{
-    const result=await syncAttendanceCheckOutToSupabase();
-    stage1RecordCheckOut(result.serverTimestamp);
+    await syncAttendanceCheckOutToSupabase();
+    stage1RecordCheckOut();
     state.checkedIn=false;
     localStorage.removeItem('sa_checkin_time');
     save();
@@ -3150,12 +3168,12 @@ confirmAttendance = async function(){
   button.disabled=true;
   button.textContent='MENYIMPAN ABSENSI...';
   try{
-    const result=await syncAttendanceCheckInToSupabase();
+    await syncAttendanceCheckInToSupabase();
     state.checkedIn=true;
-    localStorage.setItem('sa_checkin_time',formatWIBTime(result.serverTimestamp));
+    localStorage.setItem('sa_checkin_time',nowTime());
     localStorage.setItem('sa_attendance_photo','verified');
-    localStorage.setItem('sa_attendance_date',result.attendanceDate);
-    stage1RecordCheckIn(result.serverTimestamp);
+    localStorage.setItem('sa_attendance_date',stage1Date());
+    stage1RecordCheckIn();
     save();
     stopCamera();
     document.getElementById('verificationScreen').classList.add('hidden');
