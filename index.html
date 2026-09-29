@@ -7957,7 +7957,7 @@ function repV2AttendanceChangeDivision(v){
     const tabs=[
       ['executive','Executive Dashboard'],['attendance','Absensi Tim'],['fundraising','Fundraising'],['crm','CRM / Donor'],['program','Program'],['content','Konten'],['partnership','Kemitraan'],['team','Kinerja Tim'],['insight','Analisis & Insight']
     ];
-    return `<div class="rep-v2-tabs">${tabs.map(([k,l])=>`<button class="rep-v2-tab ${reportingV2.tab===k?'active':''}" onclick="reportingV2OpenTab('${k}')">${l}</button>`).join('')}</div>`;
+    return `<div class="rep-v2-tabs">${tabs.map(([k,l])=>`<button type="button" class="rep-v2-tab ${reportingV2.tab===k?'active':''}" onclick="${k==='attendance'?'openPhase2CAttendance()':`reportingV2OpenTab('${k}')` }">${l}</button>`).join('')}</div>`;
   };
   const baseRender=reportingV2RenderTab;
   reportingV2RenderTab=function(data){
@@ -7965,6 +7965,22 @@ function repV2AttendanceChangeDivision(v){
     return baseRender(data);
   };
 })();
+
+/* Direct attendance-tab handler: bypasses the older generic tab renderer. */
+function openPhase2CAttendance(){
+  try{
+    reportingV2.tab='attendance';
+    const el=document.getElementById('content');
+    if(!el)throw new Error('Container Pelaporan tidak ditemukan.');
+    const data=repV2Filtered(repV2ActiveData());
+    el.innerHTML=reportingV2AttendancePageTab(data);
+    document.querySelectorAll('.rep-v2-tab').forEach(b=>b.classList.toggle('active',b.textContent.trim()==='Absensi Tim'));
+  }catch(err){
+    console.error('Phase 2C attendance render error:',err);
+    if(typeof toast==='function')toast('Absensi gagal dibuka: '+(err?.message||'Unknown error'));
+  }
+}
+window.openPhase2CAttendance=openPhase2CAttendance;
 
 /* Public helpers for inline buttons/inputs. */
 window.repV2AttendanceChangeMonth=repV2AttendanceChangeMonth;
