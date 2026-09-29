@@ -7813,13 +7813,13 @@ function repV2AttRows(d){
   attendance.filter(a=>repV2AttDateInMonth(a.attendance_date,month)).forEach(a=>{
     const uid=String(a.user_id||'');
     const p=map.get(uid);
-    if(division && String(p?.division||'')!==division)return;
+    if(division && String(p?.division||'').trim().toLowerCase()!==String(division).trim().toLowerCase())return;
     if(!grouped.has(uid))grouped.set(uid,{profile:p||{id:uid,full_name:'User tidak ditemukan',division:'-'},records:[]});
     grouped.get(uid).records.push(a);
   });
 
   profiles.forEach(p=>{
-    if(division && String(p.division||'')!==division)return;
+    if(division && String(p.division||'').trim().toLowerCase()!==String(division).trim().toLowerCase())return;
     const uid=String(p.id||'');
     if(!grouped.has(uid))grouped.set(uid,{profile:p,records:[]});
   });
@@ -8008,9 +8008,41 @@ function repV2AttendanceChangeDate(v){
   repV2AttendanceRerender();
 }
 function repV2AttendanceChangeDivision(v){
-  reportingV2.attendanceDivision=v||'';
+  /* PHASE 2D FIX — apply division filter immediately and rerender only
+     the active attendance report. */
+  reportingV2.attendanceDivision=String(v||'').trim();
   localStorage.setItem('sa_report_attendance_division',reportingV2.attendanceDivision);
-  repV2AttendanceRerender();
+
+  try{
+    reportingV2.tab='attendance';
+    const el=document.getElementById('content');
+    if(!el) throw new Error('Container Pelaporan tidak ditemukan.');
+
+    const data=repV2Filtered(repV2ActiveData());
+    const divisionKey=String(reportingV2.attendanceDivision||'').trim().toLowerCase();
+
+    const renderer=(typeof repV2AttendanceTab==='function')
+      ? repV2AttendanceTab
+      : ((typeof repV2AttendancePageTab==='function') ? repV2AttendancePageTab : null);
+    if(!renderer) throw new Error('Renderer absensi belum termuat.');
+
+    el.innerHTML=renderer(data);
+
+    const select=document.getElementById('repV2AttDivision');
+    if(select){
+      const matched=[...select.options].find(o=>
+        String(o.value||'').trim().toLowerCase()===divisionKey
+      );
+      select.value=matched ? matched.value : '';
+    }
+
+    document.querySelectorAll('.rep-v2-tab').forEach(b=>
+      b.classList.toggle('active',b.textContent.trim()==='Absensi Tim')
+    );
+  }catch(err){
+    console.error('Phase 2D division filter error:',err);
+    if(typeof toast==='function')toast('Filter divisi gagal: '+(err?.message||'Unknown error'));
+  }
 }
 
 /* Add the new tab without touching the existing reporting modules. */
